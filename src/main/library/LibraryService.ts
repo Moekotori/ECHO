@@ -3007,13 +3007,20 @@ export class LibraryService {
     this.searchIndexBackfillAllowDuringPlayback = false;
     this.searchIndexBackfillRunning = true;
     try {
-      if (!allowDuringPlayback && await shouldDelayGroupingRefreshForAudio()) {
+      if (this.scanJobQueue.hasRunningJobs() || (!allowDuringPlayback && await shouldDelayGroupingRefreshForAudio())) {
         this.searchIndexBackfillRunning = false;
         this.scheduleSearchIndexBackfill();
         return;
       }
 
-      const changed = await this.store.rebuildJapaneseRomanizedSearchTerms();
+      const missingChanged = await this.store.backfillMissingSearchTerms(() => this.closed || this.scanJobQueue.hasRunningJobs());
+      if (this.closed) return;
+      if (this.scanJobQueue.hasRunningJobs()) {
+        this.searchIndexBackfillRunning = false;
+        this.scheduleSearchIndexBackfill();
+        return;
+      }
+      const changed = missingChanged + await this.store.rebuildJapaneseRomanizedSearchTerms();
       if (!this.closed && changed > 0) {
         this.notifyLibraryChanged();
       }

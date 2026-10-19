@@ -176,6 +176,7 @@ class FakeStore {
   finishFolderScanCalls = 0;
   getTrackCacheStatesByFolderCalls = 0;
   getTrackCacheStatesByPathsCalls = 0;
+  readonly cacheReadBatchSizes: number[] = [];
   findTrackCoverStateCalls = 0;
   cancelled = false;
 
@@ -220,6 +221,7 @@ class FakeStore {
 
   getTrackCacheStatesByPaths(_folderId: string, paths: readonly string[]): Map<string, StoredTrackCoverState> {
     this.getTrackCacheStatesByPathsCalls += 1;
+    this.cacheReadBatchSizes.push(paths.length);
     const states = new Map<string, StoredTrackCoverState>();
     for (const filePath of paths) {
       const state = this.coverStatesByPath.get(filePath);
@@ -679,7 +681,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.updates.map((update) => update.phase)).toEqual(
       expect.arrayContaining(['discovering', 'checking_cache', 'reading_metadata', 'extracting_covers', 'grouping_albums', 'writing_database', 'finished']),
     );
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(3);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
@@ -887,6 +889,46 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
 
+  it.each([false, true])('bounds cache reads and yields during a large rescan (changesOnly=%s)', async (changesOnly) => {
+    const root = makeTempRoot();
+    const files = makeFiles(root, 850);
+    const store = new FakeStore(coverStateMap(files, (file) => coverState(file, {
+      embeddedMetadataStatus: 'present', embeddedCoverStatus: 'missing', metadataStatus: 'ok',
+      identityStatus: 'unsupported',
+    })));
+    const metadataReader = new FakeMetadataReader();
+    let eventLoopRan = false;
+    setImmediate(() => { eventLoopRan = true; });
+    const status = await runQueue(store, new FakeScanner(files), metadataReader,
+      new CapturingCoverExtractor(), join(root, 'cache'), baseFolder(root),
+      { changesOnly, reduceScanPressure: true, skipDeferredGroupingRefresh: true });
+    expect(status.status).toBe('completed');
+    expect(store.cacheReadBatchSizes).toEqual([400, 400, 50]);
+    expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
+    expect(metadataReader.paths).toEqual([]);
+    expect(eventLoopRan).toBe(true);
+  });
+
+  it('records a huge import without overflowing the JavaScript argument stack', async () => {
+    const root = makeTempRoot();
+    const store = new FakeStore();
+    const ids = Array.from({ length: 200_000 }, (_, index) => `track-${index}`);
+    const inbox = vi.spyOn(store, 'recordLibraryInboxBatch');
+    const queue = new ScanJobQueue(store as unknown as LibraryStore, new FakeScanner(makeFiles(root, 1)),
+      new FakeMetadataReader(), new CapturingCoverExtractor(), {} as AlbumService,
+      { coverCacheDir: join(root, 'cache') });
+    vi.spyOn(queue as any, 'runChangedFilePipeline').mockResolvedValue({
+      processedFiles: ids.length, skippedFiles: 0, addedTracks: ids.length, updatedTracks: 0,
+      coverCount: 0, addedTrackIds: ids, seedAlbumsDurationMs: 0, seedAlbumsBatchCount: 0,
+    });
+    try {
+      const job = queue.scanFolder(baseFolder(root), { skipDeferredGroupingRefresh: true });
+      await queue.waitForIdle(job.id);
+      expect(store.getScanJob()?.status).toBe('completed');
+      expect(inbox).toHaveBeenCalledWith(expect.objectContaining({ trackIds: ids }));
+    } finally { queue.dispose(); }
+  });
+
   it('changes-only scans read added and modified files and mark removed paths', async () => {
     const root = makeTempRoot();
     const existingFiles = makeFiles(root, 120);
@@ -918,8 +960,8 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(metadataReader.paths).toEqual([changedExistingFile.path, newFile.path]);
     expect(store.upsertedTracks.map((track) => track.path)).toEqual([changedExistingFile.path, newFile.path]);
     expect(store.missingPaths).toEqual([deletedFile.path]);
-    expect(store.getTrackCacheStatesByFolderCalls).toBe(1);
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(0);
+    expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
     expect(Math.max(...store.updates.map((update) => update.totalFiles ?? 0))).toBe(2);
   });
 

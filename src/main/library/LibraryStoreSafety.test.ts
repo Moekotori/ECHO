@@ -214,6 +214,26 @@ describe('LibraryStore track metadata safety', () => {
     });
   });
 
+  it('opens a library without synchronously backfilling all missing search terms', async () => {
+    const store = makeStore();
+    const folder = store.addFolder('D:\\Music');
+    database!.transaction(() => {
+      for (let index = 0; index < 205; index += 1) {
+        store.upsertTrack(baseTrack(folder.id, `D:\\Music\\${index}.flac`, { id: `track-${index}` }));
+      }
+      database!.prepare("UPDATE tracks SET search_terms = ''").run();
+    })();
+    const reopened = new LibraryStore(database!);
+    const missing = () => Number(database!.prepare("SELECT COUNT(*) AS n FROM tracks WHERE search_terms = ''").get().n);
+    expect(missing()).toBe(205);
+    let batches = 0;
+    expect(await reopened.backfillMissingSearchTerms(() => ++batches > 1)).toBe(100);
+    expect(missing()).toBe(105);
+    expect(await reopened.backfillMissingSearchTerms()).toBe(105);
+    expect(missing()).toBe(0);
+    expect(reopened.getTracks({ search: 'Safe Title', pageSize: 10 }).total).toBe(205);
+  });
+
   it('backfills Japanese romaji search terms for existing tracks', async () => {
     const store = makeStore();
     const folder = store.addFolder('D:\\Music');

@@ -1147,61 +1147,48 @@ export class LibraryStore {
     this.database.function('echo_library_sort_key', libraryTextSortKey);
     this.database.function('echo_remote_dirname', remoteDirectoryName);
     this.database.function('echo_remote_album_merge_title', normalizeRemoteAlbumTitleForMerge);
-    if (!this.database.readonly) this.backfillSearchTerms();
   }
 
-  private backfillSearchTerms(): void {
-    const localRows = this.database
-      .prepare<[], DbRow>(
-        `SELECT id, path, title, artist, album, album_artist, genre
-         FROM tracks
-         WHERE search_terms = '' OR search_terms IS NULL`,
-      )
-      .all();
-    const remoteRows = this.database
-      .prepare<[], DbRow>(
-        `SELECT id, remote_path, title, artist, album, album_artist, genre
-         FROM remote_tracks
-         WHERE search_terms = '' OR search_terms IS NULL`,
-      )
-      .all();
-
-    if (localRows.length === 0 && remoteRows.length === 0) {
-      return;
+  async backfillMissingSearchTerms(shouldStop: () => boolean = () => false): Promise<number> {
+    if (this.database.readonly) return 0;
+    let changed = 0;
+    for (const table of ['tracks', 'remote_tracks'] as const) {
+      const pathColumn = table === 'tracks' ? 'path' : 'remote_path';
+      const selectRows = this.database.prepare<[number, number], DbRow>(
+        `SELECT rowid, id, ${pathColumn} AS search_path, title, artist, album, album_artist, genre
+         FROM ${table}
+         WHERE rowid > ? AND (search_terms = '' OR search_terms IS NULL)
+         ORDER BY rowid LIMIT ?`,
+      );
+      const update = this.database.prepare<[string, string]>(
+        `UPDATE ${table} SET search_terms = ? WHERE id = ? AND (search_terms = '' OR search_terms IS NULL)`,
+      );
+      let lastRowId = 0;
+      for (;;) {
+        // Let startup, IPC and scan work progress between bounded transactions.
+        await yieldToMainLoop();
+        if (shouldStop() || !this.database.open) return changed;
+        const rows = selectRows.all(lastRowId, searchTermsBackfillBatchSize);
+        if (rows.length === 0) break;
+        lastRowId = Number(rows[rows.length - 1]!.rowid);
+        this.database.transaction(() => {
+          for (const row of rows) {
+            changed += update.run(buildTrackSearchTerms({
+              title: String(row.title ?? ''),
+              artist: String(row.artist ?? ''),
+              album: String(row.album ?? ''),
+              albumArtist: String(row.album_artist ?? ''),
+              genre: textOrNull(row.genre),
+              ...(table === 'tracks'
+                ? { path: textOrNull(row.search_path) }
+                : { remotePath: textOrNull(row.search_path) }),
+            }), String(row.id)).changes;
+          }
+        })();
+      }
+      if (shouldStop() || !this.database.open) return changed;
     }
-
-    const updateLocal = this.database.prepare<[string, string]>('UPDATE tracks SET search_terms = ? WHERE id = ?');
-    const updateRemote = this.database.prepare<[string, string]>('UPDATE remote_tracks SET search_terms = ? WHERE id = ?');
-
-    this.database.transaction(() => {
-      for (const row of localRows) {
-        updateLocal.run(
-          buildTrackSearchTerms({
-            title: String(row.title ?? ''),
-            artist: String(row.artist ?? ''),
-            album: String(row.album ?? ''),
-            albumArtist: String(row.album_artist ?? ''),
-            genre: textOrNull(row.genre),
-            path: textOrNull(row.path),
-          }),
-          String(row.id),
-        );
-      }
-
-      for (const row of remoteRows) {
-        updateRemote.run(
-          buildTrackSearchTerms({
-            title: String(row.title ?? ''),
-            artist: String(row.artist ?? ''),
-            album: String(row.album ?? ''),
-            albumArtist: String(row.album_artist ?? ''),
-            genre: textOrNull(row.genre),
-            remotePath: textOrNull(row.remote_path),
-          }),
-          String(row.id),
-        );
-      }
-    })();
+    return changed;
   }
 
   async prepareTrackSearchTerms(track: TrackWrite): Promise<string> {
