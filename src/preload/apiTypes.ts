@@ -760,6 +760,7 @@ export type EchoApi = {
       eventClients: number;
     }>;
   };
+  /** @deprecated Removed in 26.10.3; retained for legacy renderer data compatibility only. */
   streaming?: {
     search: (request: StreamingSearchRequest) => Promise<StreamingSearchResult>;
     getTrack: (request: { provider: StreamingProviderName; providerTrackId: string }) => Promise<StreamingTrack>;
@@ -883,6 +884,7 @@ export type EchoApi = {
     reportRendererError: (payload: RendererErrorPayload) => Promise<void>;
     reportPerformanceStall: (payload: DiagnosticPerformanceStallPayload) => Promise<void>;
   };
+  /** @deprecated Removed in 26.10.3; never exposed by the desktop preload. */
   downloads?: {
     getJobs: () => Promise<DownloadJob[]>;
     createUrlJob: (url: string, options?: CreateDownloadUrlJobOptions) => Promise<DownloadJob>;
@@ -934,6 +936,7 @@ export type EchoApi = {
     setYouTubeBrowser?: (browser: YouTubeBrowser) => Promise<AccountStatus>;
     onStatusesChanged: (handler: (statuses: AccountStatus[]) => void) => () => void;
   };
+  /** @deprecated Removed in 26.10.3; never exposed by the desktop preload. */
   spotify?: {
     getAccessToken: () => Promise<string>;
     getDevices: () => Promise<Array<{ id: string; name: string; type: string; isActive: boolean; isRestricted: boolean; volumePercent: number | null }>>;
@@ -1032,6 +1035,13 @@ export type EchoApi = {
     updateSettings: (patch: MqttIntegrationSettingsPatch) => Promise<MqttIntegrationStatus>;
   };
 };
+
+// Make every supported namespace mandatory at the actual exposure boundary.
+// Compatibility declarations above must never turn into phantom desktop APIs.
+export type RemovedDesktopNamespace = 'streaming' | 'downloads' | 'spotify';
+export type DesktopEchoApi = {
+  [Key in Exclude<keyof EchoApi, RemovedDesktopNamespace>]-?: NonNullable<EchoApi[Key]>;
+} & { [Key in RemovedDesktopNamespace]?: never };
 
 declare global {
   interface Window {

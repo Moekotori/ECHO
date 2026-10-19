@@ -1077,15 +1077,29 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ autoUpdateEnabled: 'yes' as never }).autoUpdateEnabled).toBe(true);
   });
 
-  it('enables the streaming entry by default while keeping the notice opt-in', async () => {
+  it('keeps removed pages hidden when migrating an old customized sidebar', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+    const settings = normalizeSettings({
+      sidebarRouteOrder: ['albums', 'streaming', 'songs', 'downloads', 'osu-downloader'],
+      sidebarHiddenRouteIds: [],
+      streamingFeatureEnabled: true,
+      osuDownloaderFeatureEnabled: true,
+    });
+    expect(settings.sidebarRouteOrder?.slice(0, 3)).toEqual(['albums', 'streaming', 'songs']);
+    expect(settings.sidebarHiddenRouteIds).toEqual(expect.arrayContaining(['streaming', 'downloads', 'osu-downloader']));
+    expect(settings.streamingFeatureEnabled).toBe(false);
+    expect(settings.osuDownloaderFeatureEnabled).toBe(false);
+  });
+
+  it('keeps removed streaming and osu downloader features disabled even with legacy settings', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({}).streamingFeatureEnabled).toBe(true);
-    expect(normalizeSettings({ streamingFeatureEnabled: true }).streamingFeatureEnabled).toBe(true);
+    expect(normalizeSettings({}).streamingFeatureEnabled).toBe(false);
+    expect(normalizeSettings({ streamingFeatureEnabled: true }).streamingFeatureEnabled).toBe(false);
     expect(normalizeSettings({ streamingFeatureEnabled: false }).streamingFeatureEnabled).toBe(false);
-    expect(normalizeSettings({ streamingFeatureEnabled: 'yes' as never }).streamingFeatureEnabled).toBe(true);
+    expect(normalizeSettings({ streamingFeatureEnabled: 'yes' as never }).streamingFeatureEnabled).toBe(false);
     expect(normalizeSettings({}).osuDownloaderFeatureEnabled).toBe(false);
-    expect(normalizeSettings({ osuDownloaderFeatureEnabled: true }).osuDownloaderFeatureEnabled).toBe(true);
+    expect(normalizeSettings({ osuDownloaderFeatureEnabled: true }).osuDownloaderFeatureEnabled).toBe(false);
     expect(normalizeSettings({ osuDownloaderFeatureEnabled: false }).osuDownloaderFeatureEnabled).toBe(false);
     expect(normalizeSettings({ osuDownloaderFeatureEnabled: 'yes' as never }).osuDownloaderFeatureEnabled).toBe(false);
     expect(normalizeSettings({}).streamingPlaylistImportNoticeAccepted).toBe(false);
@@ -1878,7 +1892,7 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true }, { downloadsFeatureUnlocked: true }).downloadsFeatureUnlocked).toBe(false);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, downloadsFeatureUnlocked: true }, { downloadsFeatureUnlocked: false }).downloadsFeatureUnlocked).toBe(false);
     expect(normalizeSettings({ downloadsFeatureKeyAccepted: true, streamingDownloadActionsEnabled: true }, { downloadsFeatureUnlocked: true }).streamingDownloadActionsEnabled).toBe(false);
-    expect(normalizeSettings({ osuDownloaderFeatureEnabled: true }).osuDownloaderFeatureEnabled).toBe(true);
+    expect(normalizeSettings({ osuDownloaderFeatureEnabled: true }).osuDownloaderFeatureEnabled).toBe(false);
   });
 
   it('normalizes lyrics settings', async () => {

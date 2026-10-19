@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockIpcRenderer } from '../test-utils/electronMocks';
 import { IpcChannels } from '../shared/constants/ipcChannels';
+import type { DesktopEchoApi, RemovedDesktopNamespace } from './apiTypes';
 import {
   createAppApi,
   createDesktopLyricsApi,
@@ -21,12 +22,11 @@ import {
   createAccountsApi,
   createPluginsApi,
   createEchoLinkApi,
+  createSmtcApi, createAudioCdApi, createLastFmApi, createDiscordPresenceApi, createStageBridgeApi, createMqttIntegrationApi,
 } from './ipc';
 
 // ---------------------------------------------------------------------------
-// Expected namespaces — kept in sync with apiTypes.ts EchoApi type.
-// smtc / discordPresence / lastfm are not yet in apiTypes.ts — add them
-// here when corresponding preload factories are created.
+// Expected namespaces are exhaustively checked against the active desktop type.
 // ---------------------------------------------------------------------------
 const expectedNamespaces = [
   'app',
@@ -48,13 +48,16 @@ const expectedNamespaces = [
   'plugins',
   'sleepTimer',
   'echoLink',
-] as const;
+  'taskbarMiniPlayer', 'smtc', 'audioCd', 'lastfm', 'discordPresence', 'stageBridge', 'mqttIntegration',
+] as const satisfies ReadonlyArray<Exclude<keyof DesktopEchoApi, RemovedDesktopNamespace>>;
+
+const allNamespacesCovered: Exclude<keyof DesktopEchoApi, RemovedDesktopNamespace | typeof expectedNamespaces[number]> extends never ? true : never = true;
 
 // ---------------------------------------------------------------------------
 // Build the full echoApi shape the same way src/preload/index.ts does,
 // but with test mocks.
 // ---------------------------------------------------------------------------
-function buildEchoApi() {
+function buildEchoApi(): DesktopEchoApi {
   const ipcRenderer = createMockIpcRenderer() as any;
   const sa = {
     systemAudioModeActive: false,
@@ -103,6 +106,15 @@ function buildEchoApi() {
     plugins: createPluginsApi(ipcRenderer, IpcChannels, webUtils as any),
     sleepTimer: createSleepTimerApi(ipcRenderer, IpcChannels),
     echoLink: createEchoLinkApi(ipcRenderer, IpcChannels),
+    taskbarMiniPlayer: {
+      show: vi.fn(), hide: vi.fn(), getState: vi.fn(), setEnabled: vi.fn(), onStateChanged: vi.fn(),
+    },
+    smtc: createSmtcApi(ipcRenderer, IpcChannels),
+    audioCd: createAudioCdApi(ipcRenderer, IpcChannels),
+    lastfm: createLastFmApi(ipcRenderer, IpcChannels),
+    discordPresence: createDiscordPresenceApi(ipcRenderer, IpcChannels),
+    stageBridge: createStageBridgeApi(ipcRenderer, IpcChannels),
+    mqttIntegration: createMqttIntegrationApi(ipcRenderer, IpcChannels),
   };
 }
 
@@ -113,6 +125,7 @@ describe('echoApi shape', () => {
   const echoApi = buildEchoApi();
 
   it('has exactly the expected namespaces', () => {
+    expect(allNamespacesCovered).toBe(true);
     const actualKeys = Object.keys(echoApi).sort();
     const expectedKeys = [...expectedNamespaces].sort();
     expect(actualKeys).toEqual(expectedKeys);

@@ -1,7 +1,6 @@
 import {
   Captions,
   Clock3,
-  Download,
   FileDown,
   Gauge,
   Monitor,
@@ -118,12 +117,6 @@ export const playerBarButtonSettingsItems: PlayerBarButtonSettingsItem[] = [
     labelKey: 'settings.appearance.playerBarButtons.speed',
     descriptionKey: 'settings.appearance.playerBarButtons.speed.description',
     icon: Gauge,
-  },
-  {
-    id: 'streamingDownload',
-    labelKey: 'settings.appearance.playerBarButtons.streamingDownload',
-    descriptionKey: 'settings.appearance.playerBarButtons.streamingDownload.description',
-    icon: Download,
   },
   {
     id: 'audioExport',

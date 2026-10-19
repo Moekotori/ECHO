@@ -28,6 +28,9 @@ export type SidebarRouteId = typeof sidebarRouteIds[number];
 
 export const defaultSidebarRouteOrder: SidebarRouteId[] = [...sidebarRouteIds];
 export const defaultSidebarHiddenRouteIds: SidebarRouteId[] = [
+  'streaming',
+  'downloads',
+  'osu-downloader',
   'audio-cd',
   'inbox',
   'import-folder',
@@ -36,7 +39,8 @@ export const defaultSidebarHiddenRouteIds: SidebarRouteId[] = [
   'import-file',
 ];
 export const lockedVisibleSidebarRouteIds: SidebarRouteId[] = ['settings'];
-export const lockedHiddenSidebarRouteIds: SidebarRouteId[] = [];
+// Retain IDs to migrate old saved layouts, but never offer removed pages.
+export const lockedHiddenSidebarRouteIds: SidebarRouteId[] = ['streaming', 'downloads', 'osu-downloader'];
 
 const sidebarRouteIdSet = new Set<string>(sidebarRouteIds);
 const lockedVisibleSidebarRouteIdSet = new Set<string>(lockedVisibleSidebarRouteIds);

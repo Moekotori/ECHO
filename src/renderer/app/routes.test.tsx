@@ -45,6 +45,12 @@ const isLazyRoute = (id: AppRouteId): boolean => {
 };
 
 describe('app route loading boundaries', () => {
+  it('does not register removed streaming or download pages', () => {
+    for (const id of ['streaming', 'downloads', 'osu-downloader']) {
+      expect(appRoutes.some((route) => route.id === id)).toBe(false);
+    }
+  });
+
   it('creates navigable routes for enabled sandbox plugin panels', () => {
     const plugin = {
       id: 'echo.panel',

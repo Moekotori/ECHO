@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createSystemAudioEngine, type AutomixAdvancePayload } from './systemAudioEngine';
-import type { EchoApi } from './apiTypes';
+import type { DesktopEchoApi, EchoApi } from './apiTypes';
 import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createPetApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, type PlaybackDeps, createRemoteSourcesApi, createConnectApi, createLyricsApi, createMvApi, createHqPlayerApi, createAudioApi, createEqApi,
   createSleepTimerApi, createDiagnosticsApi, createAccountsApi, createPluginsApi,
   createSmtcApi, createAudioCdApi, setupPlaybackProxy,
@@ -35,7 +35,7 @@ ipcRenderer.on(IpcChannels.PlaybackAutomixAdvance, (_e, p) => {
   for (const h of automixHandlers) h(ev);
 });
 const deps: PlaybackDeps = { localAudioFileOpenHandlers: localFileHandlers, pendingLocalAudioFileOpenEvents: pendingLocalFiles, automixAdvanceHandlers: automixHandlers, mainWindowControlHandlers, isMainPlaybackRenderer: isMain, invokeMainPlaybackRenderer: invokeMain };
-const echoApi: EchoApi = {
+const echoApi: DesktopEchoApi = {
   app: createAppApi(ipcRenderer, IpcChannels), desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
   miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels), pet: createPetApi(ipcRenderer, IpcChannels), library: createLibraryApi(ipcRenderer, IpcChannels, webUtils),
   taskbarMiniPlayer: {

@@ -712,7 +712,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const notificationsDisabledRef = useRef(false);
   const [upcomingTrackNoticeEnabled, setUpcomingTrackNoticeEnabled] = useState(false);
   const upcomingTrackNoticeEnabledRef = useRef(false);
-  const [streamingFeatureEnabled, setStreamingFeatureEnabled] = useState(true);
+  const [streamingFeatureEnabled, setStreamingFeatureEnabled] = useState(false);
   const [osuDownloaderFeatureEnabled, setOsuDownloaderFeatureEnabled] = useState(false);
   const [upcomingTrackNotice, setUpcomingTrackNotice] = useState<UpcomingTrackNotice | null>(null);
   const [isUpcomingTrackNoticeVisible, setIsUpcomingTrackNoticeVisible] = useState(false);
