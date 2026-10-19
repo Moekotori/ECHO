@@ -292,6 +292,11 @@ class FakeStore {
     return this.coverStatesByPath.has(track.path) ? 'updated' : 'added';
   }
 
+  async refreshGroupingCooperatively(_service: unknown, options: { includeAlbums?: boolean } = {}): Promise<void> {
+    if (options.includeAlbums !== false) this.refreshAlbums();
+    this.refreshArtists();
+  }
+
   refreshAlbums(): void {
     this.refreshAlbumsCalls += 1;
   }
@@ -312,6 +317,15 @@ class FakeStore {
     this.finishFolderScanCalls += 1;
   }
 
+  findScanDirectorySnapshot(_folderId: string, path: string): ScanDirectorySnapshot | null {
+    return this.snapshotsByPath.get(pathCompareValue(path)) ?? null;
+  }
+
+  async recordLibraryInboxBatchCooperatively(input: unknown, check: () => void): Promise<null> {
+    check();
+    return this.recordLibraryInboxBatch(input);
+  }
+
   getScanDirectorySnapshotsByFolder(): Map<string, ScanDirectorySnapshot> {
     return new Map(this.snapshotsByPath);
   }
@@ -320,7 +334,7 @@ class FakeStore {
     this.directorySnapshots.push(...snapshots);
   }
 
-  recordLibraryInboxBatch(): null {
+  recordLibraryInboxBatch(_input?: unknown): null {
     return null;
   }
 }
@@ -935,6 +949,29 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     } finally {
       Object.defineProperty(process, 'platform', platformDescriptor);
     }
+  });
+
+  it('reads directory snapshots on demand and does not retain oversized directory caches', async () => {
+    const root = makeTempRoot();
+    const folder = baseFolder(root);
+    const small = { path: folder.path, mtimeMs: 1, entries: [{ name: 'song.flac', kind: 'file' as const }] };
+    const store = new FakeStore(new Map(), new Map([[pathCompareValue(folder.path), small]]));
+    const bulkRead = vi.spyOn(store, 'getScanDirectorySnapshotsByFolder').mockImplementation(() => { throw new Error('full-tree cache load'); });
+    const reads = vi.spyOn(store, 'findScanDirectorySnapshot');
+    const scanner: FileScanner = {
+      async *scanFolder(_path, options) {
+        expect(options?.getDirectorySnapshot?.(folder.path)).toEqual(small);
+        options?.onDirectorySnapshot?.(small);
+        options?.onDirectorySnapshot?.({ path: join(folder.path, 'huge'), mtimeMs: 1,
+          entries: Array.from({ length: 4097 }, (_, index) => ({ name: `${index}.flac`, kind: 'file' as const })) });
+        yield* [];
+      },
+    };
+    const status = await runQueue(store, scanner, new FakeMetadataReader(), new CapturingCoverExtractor(), join(root, 'cache'), folder);
+    expect(status.status).toBe('completed');
+    expect(bulkRead).not.toHaveBeenCalled();
+    expect(reads).toHaveBeenCalledOnce();
+    expect(store.directorySnapshots).toEqual([small]);
   });
 
   it('records a huge import without overflowing the JavaScript argument stack', async () => {

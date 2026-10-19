@@ -2499,7 +2499,7 @@ describe('Library Core', () => {
     expect(harness.service.getAlbums({ pageSize: 10 }).total).toBe(2);
     const metadataCallsAfterScan = harness.metadataService.calls.length;
     harness.setAlbumMergeStrategy('sameTitleAndCover');
-    const summary = harness.service.refreshAlbumGrouping();
+    const summary = await harness.service.refreshAlbumGrouping();
 
     expect(summary.albumCount).toBe(1);
     expect(harness.service.getAlbums({ pageSize: 10 }).items[0].trackCount).toBe(2);
@@ -2516,7 +2516,7 @@ describe('Library Core', () => {
 
     await harness.service.importAudioFile(first);
     await harness.service.importAudioFile(second);
-    harness.service.refreshAlbumGrouping();
+    await harness.service.refreshAlbumGrouping();
     const oldAlbum = harness.service.getAlbums({ pageSize: 10 }).items[0]!;
 
     const updated = await harness.service.updateAlbumTags({
@@ -3935,7 +3935,7 @@ describe('Library Core', () => {
     const status = await harness.scanFolder();
     expect(status.status).toBe('completed');
     expect(status.errors).toEqual([]);
-    harness.service.refreshAlbumGrouping();
+    await harness.service.refreshAlbumGrouping();
     expect(harness.service.getTracks({ pageSize: 10 }).total).toBe(4);
     expect(harness.service.getAlbums({ pageSize: 10 }).total).toBe(1);
     const artist = harness.service.getArtists({ pageSize: 10 }).items.find((item) => item.name === 'Taylor Swift');

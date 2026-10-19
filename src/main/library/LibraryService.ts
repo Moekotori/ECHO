@@ -1,3 +1,4 @@
+import { LibraryMaintenanceInterrupted } from './LibraryMaintenanceWorkspace';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { stat as statFile } from 'node:fs/promises';
@@ -1677,16 +1678,16 @@ export class LibraryService {
           this.startReplayGainAnalysis({ trackIds: [track.id], force: false });
         }
 
-        if (options.deferGroupingRefresh === true) {
-          this.store.seedAlbumsForTracks([track.id], this.albumService, timestamp, this.albumRefreshOptions());
-        } else {
-          this.store.refreshAlbums(this.albumService, undefined, this.albumRefreshOptions());
-          this.store.refreshArtists();
-        }
+        this.store.seedAlbumsForTracks([track.id], this.albumService, timestamp, this.albumRefreshOptions());
 
         return track;
       });
-      this.scheduleGroupingRefresh();
+      if (options.deferGroupingRefresh === true) {
+        this.scheduleGroupingRefresh();
+      } else {
+        try { await this.store.refreshArtistsCooperatively(); }
+        catch { this.scheduleGroupingRefresh(); }
+      }
       return track;
     });
   }
@@ -1901,18 +1902,15 @@ export class LibraryService {
     this.store.clearPlaybackHistory();
   }
 
-  refreshAlbumGrouping(): LibrarySummary {
+  async refreshAlbumGrouping(): Promise<LibrarySummary> {
     if (this.hasRunningJobs()) {
       throw new Error('Cannot refresh album grouping while a library scan is running.');
     }
 
     const startedAtMs = Date.now();
     try {
-      const summary = this.store.transaction(() => {
-        this.store.refreshAlbums(this.albumService, new Date().toISOString(), this.albumRefreshOptions());
-        this.store.refreshArtists();
-        return this.store.getSummary();
-      });
+      await this.store.refreshGroupingCooperatively(this.albumService, this.albumRefreshOptions());
+      const summary = this.store.getSummary();
       this.groupingRefreshQueued = false;
       this.groupingRefreshRetryCount = 0;
       this.lastGroupingRefreshDurationMs = Date.now() - startedAtMs;
@@ -1934,10 +1932,15 @@ export class LibraryService {
 
     return runNonCriticalMainWork<LibraryAlbumGroupingRefreshResult>({
       name: 'library:refresh-album-grouping',
-      work: () => ({
-        status: 'completed' as const,
-        summary: this.refreshAlbumGrouping(),
-      }),
+      work: async () => {
+        try {
+          return { status: 'completed' as const, summary: await this.refreshAlbumGrouping() };
+        } catch (error) {
+          if (!(error instanceof LibraryMaintenanceInterrupted)) throw error;
+          this.scheduleGroupingRefresh(3000);
+          return { status: 'deferred' as const, summary: this.store.getSummary() };
+        }
+      },
       fallback: () => {
         this.groupingRefreshDelayedForPlaybackCount += 1;
         this.scheduleGroupingRefresh(3000);
@@ -3309,8 +3312,7 @@ export class LibraryService {
       return;
     }
 
-    this.store.refreshArtists();
-    this.artistsDirty = false;
+    this.scheduleGroupingRefresh();
   }
 
   private artistImagesNetworkEnabled(): boolean {
@@ -3387,7 +3389,7 @@ export class LibraryService {
       return;
     }
 
-    if (await shouldDelayGroupingRefreshForAudio()) {
+    if (this.hasRunningJobs() || await shouldDelayGroupingRefreshForAudio()) {
       this.groupingRefreshRetryCount += 1;
       this.groupingRefreshDelayedForPlaybackCount += 1;
       this.scheduleGroupingRefresh(Math.min(15000, 3000 + this.groupingRefreshRetryCount * 1000));
@@ -3398,12 +3400,9 @@ export class LibraryService {
     this.groupingRefreshRetryCount = 0;
     const startedAtMs = Date.now();
     try {
-      await runMainBackgroundTask('library-scan:grouping_albums', () => {
-        this.store.transaction(() => {
-          this.store.refreshAlbums(this.albumService, undefined, this.albumRefreshOptions());
-          this.store.refreshArtists();
-        });
-      });
+      await runMainBackgroundTask('library-scan:grouping_albums', () =>
+        this.store.refreshGroupingCooperatively(this.albumService, this.albumRefreshOptions()),
+      );
       this.artistsDirty = false;
       this.lastGroupingRefreshDurationMs = Date.now() - startedAtMs;
       this.lastGroupingRefreshAt = new Date().toISOString();
@@ -3414,6 +3413,7 @@ export class LibraryService {
       this.lastGroupingRefreshDurationMs = Date.now() - startedAtMs;
       this.lastGroupingRefreshAt = new Date().toISOString();
       this.lastGroupingRefreshError = error instanceof Error ? error.message : String(error);
+      if (!this.closed && error instanceof LibraryMaintenanceInterrupted) this.scheduleGroupingRefresh(3000);
     }
   }
 

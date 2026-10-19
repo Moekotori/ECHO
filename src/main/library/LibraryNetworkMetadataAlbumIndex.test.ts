@@ -146,7 +146,7 @@ describe('network metadata album indexing', () => {
     expect(service.getAlbums({ search: 'Recovered Album', pageSize: 10 }).total).toBe(1);
   });
 
-  it('repairs orphaned album-track links with a global album grouping refresh', () => {
+  it('repairs orphaned album-track links with a global album grouping refresh', async () => {
     const root = makeTempRoot();
     const databasePath = join(root, 'library.sqlite');
     seedTrack(databasePath, root, {
@@ -165,7 +165,7 @@ describe('network metadata album indexing', () => {
 
     expect(service.getAlbumForTrack('track-1')).toBeNull();
 
-    service.refreshAlbumGrouping();
+    await service.refreshAlbumGrouping();
 
     expect(service.getAlbumForTrack('track-1')).toMatchObject({
       title: 'Already Tagged Album',

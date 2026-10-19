@@ -1,3 +1,4 @@
+import { createScanErrorBuffer, getScanErrorTotals } from './ScanErrorBuffer';
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { stat as statFile } from 'node:fs/promises';
@@ -61,6 +62,7 @@ type ChangedFile = {
   file: ScannedAudioFile;
   existingTrackId: string | null;
   existingState: StoredTrackCoverState | null;
+  reloadExistingState?: boolean;
 };
 
 type MetadataReadItem = ChangedFile & {
@@ -475,13 +477,14 @@ const compactScanMessage = (message: unknown): string => {
 };
 
 const summarizeScanErrors = (errors: string[]): { errors: string[]; errorCount: number } => {
-  const errorCount = errors.length;
+  const totals = getScanErrorTotals(errors);
+  const errorCount = totals?.count ?? errors.length;
   if (errorCount <= maxStoredScanErrors && errorCount < scanErrorSummaryThreshold) {
     return { errors, errorCount };
   }
 
-  const counts = new Map<string, number>();
-  for (const error of errors) {
+  const counts = totals?.kinds ?? new Map<string, number>();
+  if (!totals) for (const error of errors) {
     const key = classifyScanError(error);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -756,7 +759,7 @@ export class ScanJobQueue {
     osuImport = false,
   ): Promise<void> {
     const progress = this.createProgressReporter(jobId);
-    const errors: string[] = [];
+    const errors = createScanErrorBuffer(classifyScanError, maxStoredScanErrors);
     const coverCacheCompletenessMemo: CoverCacheCompletenessMemo = new Map();
 
     try {
@@ -828,7 +831,7 @@ export class ScanJobQueue {
     osuImport = false,
   ): Promise<void> {
     const progress = this.createProgressReporter(jobId);
-    const errors: string[] = [];
+    const errors = createScanErrorBuffer(classifyScanError, maxStoredScanErrors);
     const coverCacheCompletenessMemo: CoverCacheCompletenessMemo = new Map();
 
     try {
@@ -889,7 +892,7 @@ export class ScanJobQueue {
     storedTrackRecursive = true,
   ): Promise<void> {
     const progress = this.createProgressReporter(jobId);
-    const errors: string[] = [];
+    const errors = createScanErrorBuffer(classifyScanError, maxStoredScanErrors);
     const coverCacheCompletenessMemo: CoverCacheCompletenessMemo = new Map();
 
     try {
@@ -986,6 +989,7 @@ export class ScanJobQueue {
     let updatedTracks = 0;
     let removedTracks = 0;
     let coverCount = 0;
+    const largeScan = files.length >= largeScanFileThreshold;
     const scanPressureReducedAtStart =
       forceReducedScanPressure || (await this.resolveBooleanOption(this.shouldReduceScanPressure));
     const scanGuard = await this.measureScanPhase(
@@ -1034,6 +1038,7 @@ export class ScanJobQueue {
             checkedFiles += 1;
 
             const existing = cacheStatesByPath.get(resolve(file.path)) ?? null;
+            cacheStatesOverride?.delete(resolve(file.path));
 
             const unchanged = existing && existing.sizeBytes === file.sizeBytes && existing.mtimeMs === file.mtimeMs;
             const forceReadEmbeddedTags =
@@ -1046,7 +1051,7 @@ export class ScanJobQueue {
                 this.hasCompleteCoverCache(existing, coverCacheCompletenessMemo) ||
                 this.canReuseTerminalNoCoverState(mode, existing)
               ) {
-                if (!scanPressureReducedAtStart && !this.hasIdentityObservation(existing)) {
+                if (!scanPressureReducedAtStart && !largeScan && !this.hasIdentityObservation(existing)) {
                   identityUpdateItems.push({
                     file,
                     state: existing,
@@ -1077,7 +1082,8 @@ export class ScanJobQueue {
               changedFiles.push({
                 file,
                 existingTrackId: existing.id,
-                existingState: existing,
+                existingState: largeScan ? null : existing,
+                reloadExistingState: largeScan,
               });
               await yieldCacheCheckIfNeeded();
               continue;
@@ -1086,7 +1092,8 @@ export class ScanJobQueue {
             changedFiles.push({
               file,
               existingTrackId: existing?.id ?? null,
-              existingState: existing,
+              existingState: largeScan ? null : existing,
+              reloadExistingState: largeScan && existing !== null,
             });
             await yieldCacheCheckIfNeeded();
           }
@@ -1104,7 +1111,6 @@ export class ScanJobQueue {
       const timestamp = new Date().toISOString();
       const coverTimestamp = timestamp;
 
-      const largeScan = files.length >= largeScanFileThreshold;
       const skipIdentityObservation = scanPressureReducedAtStart || largeScan;
       const { metadataConcurrency, coverConcurrency } = this.getConfiguredConcurrency();
       const pipelineResult = await this.runChangedFilePipeline({
@@ -1339,6 +1345,16 @@ export class ScanJobQueue {
         batchSize: seedAlbumsBatchCount,
       });
 
+      if (addedTrackIds.length > 0) {
+        await this.store.recordLibraryInboxBatchCooperatively({
+          scanJobId: jobId,
+          folder,
+          trackIds: addedTrackIds,
+          createdAt: timestamp,
+          finishedAt: timestamp,
+        }, () => this.throwIfCancelled(jobId));
+      }
+
       let shouldScheduleGroupingRefresh = false;
       await this.measureScanPhase({ jobId, folderId: folder.id, phase: 'finish_scan_transaction', fileCount: files.length }, () => {
         this.store.transaction(() => {
@@ -1367,15 +1383,6 @@ export class ScanJobQueue {
         }
         const hasGroupingChanges = addedTracks > 0 || updatedTracks > 0 || removedTracks > 0;
         shouldScheduleGroupingRefresh = hasGroupingChanges;
-        if (addedTrackIds.length > 0) {
-          this.store.recordLibraryInboxBatch({
-            scanJobId: jobId,
-            folder,
-            trackIds: addedTrackIds,
-            createdAt: timestamp,
-            finishedAt: timestamp,
-          });
-        }
         progress.flushNow({
           status: 'completed',
           phase: 'finished',
@@ -1636,8 +1643,9 @@ export class ScanJobQueue {
     const files: ScannedAudioFile[] = [];
     const inaccessibleDirectories = new Set<string>();
     const protectedPaths = new Set<string>();
-    const directorySnapshots = this.store.getScanDirectorySnapshotsByFolder(folder.id);
-    const updatedSnapshots: ScanDirectorySnapshot[] = [];
+    // Read one directory cache at a time; do not retain old and new full-tree
+    // snapshots alongside the file list.
+
     let lastScannerProgressFiles = 0;
     let discoveredFileCount = 0;
     let normalizationFailureCount = 0;
@@ -1675,9 +1683,10 @@ export class ScanJobQueue {
                 errors,
               });
         },
-        getDirectorySnapshot: (directoryPath) => directorySnapshots.get(this.pathCompareValue(resolve(directoryPath))) ?? null,
+        getDirectorySnapshot: (directoryPath) => this.store.findScanDirectorySnapshot(folder.id, directoryPath),
         onDirectorySnapshot: (snapshot) => {
-          updatedSnapshots.push(snapshot);
+          this.throwIfCancelled(jobId);
+          if (snapshot.entries.length <= 4096) this.store.upsertScanDirectorySnapshots(folder.id, [snapshot]);
         },
       })) {
         this.throwIfCancelled(jobId);
@@ -1736,7 +1745,7 @@ export class ScanJobQueue {
       normalizationFailureCount,
       inaccessibleDirectories: [...inaccessibleDirectories, ...nestedFolderRoots],
       protectedPaths: Array.from(protectedPaths),
-      directorySnapshots: updatedSnapshots,
+      directorySnapshots: [],
     };
   }
 
@@ -1744,12 +1753,13 @@ export class ScanJobQueue {
     jobId: string,
     folder: LibraryFolder,
     files: ScannedAudioFile[],
-  ): Promise<{ files: ScannedAudioFile[]; statesByPath: Map<string, StoredTrackCoverState> }> {
+  ): Promise<{ files: ScannedAudioFile[]; statesByPath?: Map<string, StoredTrackCoverState> }> {
     if (process.platform === 'win32' && files.length > 0) {
       await this.reuseStoredWindowsPaths(jobId, folder, files);
     }
     const changedFiles: ScannedAudioFile[] = [];
     const changedStates = new Map<string, StoredTrackCoverState>();
+    let retainCache = true;
     for (let offset = 0; offset < files.length; offset += 400) {
       this.throwIfCancelled(jobId);
       const batch = files.slice(offset, offset + 400);
@@ -1758,12 +1768,18 @@ export class ScanJobQueue {
         const existing = states.get(resolve(file.path));
         if (!existing || existing.sizeBytes !== file.sizeBytes || existing.mtimeMs !== file.mtimeMs) {
           changedFiles.push(file);
-          if (existing) changedStates.set(resolve(file.path), existing);
+          if (existing && retainCache) {
+            changedStates.set(resolve(file.path), existing);
+            if (changedStates.size >= largeScanFileThreshold) {
+              changedStates.clear();
+              retainCache = false;
+            }
+          }
         }
       }
       await yieldToMainLoop();
     }
-    return { files: changedFiles, statesByPath: changedStates };
+    return { files: changedFiles, statesByPath: retainCache ? changedStates : undefined };
   }
 
   private async reuseStoredWindowsPaths(jobId: string, folder: LibraryFolder, files: ScannedAudioFile[]): Promise<void> {
@@ -2406,16 +2422,15 @@ export class ScanJobQueue {
       await this.measureScanPhase(
         { phase: 'refreshAlbums_refreshArtists' },
         () => runMainBackgroundTask('library-scan:grouping_albums', () => {
-          if (needsAlbumRefresh) {
-            this.store.refreshAlbums(this.albumService, undefined, { albumMergeStrategy: this.getAlbumMergeStrategy() });
-          }
-          return this.store.refreshArtistsCooperatively();
+          return this.store.refreshGroupingCooperatively(this.albumService, {
+            albumMergeStrategy: this.getAlbumMergeStrategy(), includeAlbums: needsAlbumRefresh,
+          });
         }),
       );
       this.onDeferredGroupingRefresh();
     } catch (error) {
       console.warn(`Deferred library grouping refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-      this.scheduleDeferredGroupingRefresh();
+      this.scheduleDeferredGroupingRefresh(needsAlbumRefresh);
     }
   }
 
@@ -2808,8 +2823,12 @@ export class ScanJobQueue {
         changedFiles,
         metadataConcurrency,
         forceReducedScanPressure,
-        async (item) => {
+        async (entry) => {
           this.throwIfCancelled(jobId);
+          const item = entry.reloadExistingState ? {
+            ...entry,
+            existingState: this.store.getTrackCacheStatesByPaths(folder.id, [entry.file.path]).get(resolve(entry.file.path)) ?? null,
+          } : entry;
           let metadata: MetadataResult;
           let identity: FileIdentityObservation | null = null;
           const reuseFingerprintMatchedCover = this.canReuseFingerprintMatchedEmbeddedCover(
