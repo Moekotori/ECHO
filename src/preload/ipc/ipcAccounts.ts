@@ -3,7 +3,7 @@ import type { EchoApi } from '../apiTypes';
 export function createAccountsApi(
   ipcRenderer: Electron.IpcRenderer,
   IpcChannels: Record<string, string>,
-): EchoApi['accounts'] {
+): NonNullable<EchoApi['accounts']> {
   return {
     getStatuses: () => ipcRenderer.invoke(IpcChannels.AccountGetStatuses),
     getStatus: (provider) => ipcRenderer.invoke(IpcChannels.AccountGetStatus, provider),

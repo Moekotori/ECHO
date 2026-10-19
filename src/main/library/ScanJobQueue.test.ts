@@ -219,6 +219,10 @@ class FakeStore {
     return new Map(this.coverStatesByPath);
   }
 
+  async *iterateTrackPathsByFolder(): AsyncGenerator<string> {
+    yield* this.coverStatesByPath.keys();
+  }
+
   getTrackCacheStatesByPaths(_folderId: string, paths: readonly string[]): Map<string, StoredTrackCoverState> {
     this.getTrackCacheStatesByPathsCalls += 1;
     this.cacheReadBatchSizes.push(paths.length);
@@ -907,6 +911,30 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(metadataReader.paths).toEqual([]);
     expect(eventLoopRan).toBe(true);
+  });
+
+  it.each([false, true])('preserves Windows track identity across Unicode case-only renames (modified=%s)', async (modified) => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const root = makeTempRoot();
+      const folder = baseFolder(root);
+      const storedFile = { path: join(folder.path, 'ÉCHO-Song.FLAC'), sizeBytes: 10, mtimeMs: 1 };
+      const discoveredFile = { ...storedFile, path: join(folder.path, 'écho-song.flac'), mtimeMs: modified ? 2 : 1 };
+      const store = new FakeStore(coverStateMap([storedFile], (file) => coverState(file)));
+      const reader = new FakeMetadataReader();
+      const status = await runQueue(store, new FakeScanner([discoveredFile]), reader,
+        new CapturingCoverExtractor(), join(root, 'cache'), folder,
+        { changesOnly: true, reduceScanPressure: true, skipDeferredGroupingRefresh: true });
+      expect(status).toMatchObject({ status: 'completed', addedTracks: 0, updatedTracks: modified ? 1 : 0, removedTracks: 0 });
+      expect(store.missingPaths).toEqual([]);
+      expect(reader.paths).toEqual(modified ? [storedFile.path] : []);
+      if (modified) {
+        expect(store.upsertedTracks[0]).toMatchObject({ path: storedFile.path, id: `track-${storedFile.path}` });
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', platformDescriptor);
+    }
   });
 
   it('records a huge import without overflowing the JavaScript argument stack', async () => {

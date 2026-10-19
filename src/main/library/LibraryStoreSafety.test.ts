@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { createDatabase, type EchoDatabase } from '../database/createDatabase';
 import { AlbumService } from './AlbumService';
 import { LibraryStore } from './LibraryStore';
@@ -214,6 +215,25 @@ describe('LibraryStore track metadata safety', () => {
     });
   });
 
+  it('walks stored paths cooperatively across batches without including missing or other-folder tracks', async () => {
+    const store = makeStore();
+    const folder = store.addFolder('/music');
+    const otherFolder = store.addFolder('/other');
+    database!.transaction(() => {
+      for (let index = 0; index < 405; index += 1) {
+        store.upsertTrack(baseTrack(folder.id, `/music/${index}.flac`, { id: `path-${index}` }));
+      }
+      store.upsertTrack(baseTrack(otherFolder.id, '/other/song.flac', { id: 'other-track' }));
+      database!.prepare("UPDATE tracks SET missing = 1 WHERE id = 'path-0'").run();
+    })();
+    let eventLoopRan = false;
+    setImmediate(() => { eventLoopRan = true; });
+    const paths: string[] = [];
+    for await (const path of store.iterateTrackPathsByFolder(folder.id)) paths.push(path);
+    expect(paths).toEqual(Array.from({ length: 404 }, (_, index) => resolve(`/music/${index + 1}.flac`)));
+    expect(eventLoopRan).toBe(true);
+  });
+
   it('opens a library without synchronously backfilling all missing search terms', async () => {
     const store = makeStore();
     const folder = store.addFolder('D:\\Music');
@@ -224,7 +244,8 @@ describe('LibraryStore track metadata safety', () => {
       database!.prepare("UPDATE tracks SET search_terms = ''").run();
     })();
     const reopened = new LibraryStore(database!);
-    const missing = () => Number(database!.prepare("SELECT COUNT(*) AS n FROM tracks WHERE search_terms = ''").get().n);
+    const missing = () =>
+      Number(database!.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM tracks WHERE search_terms = ''").get()?.n);
     expect(missing()).toBe(205);
     let batches = 0;
     expect(await reopened.backfillMissingSearchTerms(() => ++batches > 1)).toBe(100);

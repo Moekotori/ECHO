@@ -1745,6 +1745,9 @@ export class ScanJobQueue {
     folder: LibraryFolder,
     files: ScannedAudioFile[],
   ): Promise<{ files: ScannedAudioFile[]; statesByPath: Map<string, StoredTrackCoverState> }> {
+    if (process.platform === 'win32' && files.length > 0) {
+      await this.reuseStoredWindowsPaths(jobId, folder, files);
+    }
     const changedFiles: ScannedAudioFile[] = [];
     const changedStates = new Map<string, StoredTrackCoverState>();
     for (let offset = 0; offset < files.length; offset += 400) {
@@ -1761,6 +1764,30 @@ export class ScanJobQueue {
       await yieldToMainLoop();
     }
     return { files: changedFiles, statesByPath: changedStates };
+  }
+
+  private async reuseStoredWindowsPaths(jobId: string, folder: LibraryFolder, files: ScannedAudioFile[]): Promise<void> {
+    const filesByPath = new Map<string, ScannedAudioFile>();
+    for (let index = 0; index < files.length; index += 1) {
+      this.throwIfCancelled(jobId);
+      const file = files[index]!;
+      filesByPath.set(this.pathCompareValue(resolve(file.path)), file);
+      if (index % 400 === 399) await yieldToMainLoop();
+    }
+    // SQLite's default path equality is case-sensitive; NOCASE only folds ASCII.
+    // Match with the existing Windows key and query/upsert the persisted path so
+    // case-only renames (including Unicode names) retain their original track ID.
+    for await (const storedPath of this.store.iterateTrackPathsByFolder(folder.id)) {
+      this.throwIfCancelled(jobId);
+      const key = this.pathCompareValue(storedPath);
+      const file = filesByPath.get(key);
+      if (file) {
+        file.path = storedPath;
+        filesByPath.delete(key);
+      }
+      if (filesByPath.size === 0) break;
+    }
+    this.throwIfCancelled(jobId);
   }
 
   private async getTrackCacheStatesForFiles(

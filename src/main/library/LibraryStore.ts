@@ -2398,6 +2398,27 @@ export class LibraryStore {
     };
   }
 
+  async *iterateTrackPathsByFolder(folderId: string): AsyncGenerator<string> {
+    let lastRowId = 0;
+    for (;;) {
+      await yieldToMainLoop();
+      if (!this.database.open) return;
+      // The folder index includes rowid, so this remains a bounded indexed walk.
+      const rows = this.allRows(
+        `SELECT rowid AS row_id, path, missing FROM tracks
+         WHERE folder_id = ? AND rowid > ?
+         ORDER BY rowid LIMIT 400`,
+        folderId,
+        lastRowId,
+      );
+      if (rows.length === 0) return;
+      lastRowId = Number(rows[rows.length - 1]!.row_id);
+      for (const row of rows) {
+        if (Number(row.missing) === 0) yield resolve(String(row.path));
+      }
+    }
+  }
+
   getTrackFingerprintsByFolder(folderId: string): Map<string, StoredTrackFingerprint> {
     const rows = this.allRows(
       'SELECT id, path, size_bytes, mtime_ms FROM tracks WHERE folder_id = ? AND missing = 0',

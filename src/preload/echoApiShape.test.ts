@@ -228,7 +228,7 @@ describe('echoApi shape', () => {
 
   it('all namespace methods are functions (typeof === "function")', () => {
     for (const key of expectedNamespaces) {
-      const ns = (echoApi as Record<string, Record<string, unknown>>)[key];
+      const ns = echoApi[key];
       for (const [methodName, method] of Object.entries(ns)) {
         expect(
           typeof method,
