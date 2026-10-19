@@ -1,5 +1,6 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
+import { resolveCueAudioSource } from './CueAudioSource';
 import { decodeTextFileBytes } from '../../shared/utils/decodeTextFile';
 
 export type CueTrackSource = 'sidecar' | 'embedded';
@@ -13,6 +14,7 @@ export type CueTrack = {
   performer: string | null;
   album: string | null;
   albumArtist: string | null;
+  pregapStartSeconds: number | null;
   startSeconds: number;
   endSeconds: number | null;
 };
@@ -101,7 +103,7 @@ const readFlacPreambleOffset = (fd: number): number | null => {
 const readUint32Le = (buffer: Buffer, offset: number): number | null =>
   offset + 4 <= buffer.length ? buffer.readUInt32LE(offset) : null;
 
-const readVorbisUserCommentCueSheet = (buffer: Buffer): string | null => {
+export const readVorbisUserCommentCueSheet = (buffer: Buffer): string | null => {
   let offset = 0;
   const vendorLength = readUint32Le(buffer, offset);
   if (vendorLength === null) {
@@ -206,10 +208,10 @@ export const isCueTrackPath = (filePath: string): boolean => cueTrackSuffixPatte
 
 export const isCueSheetPath = (filePath: string): boolean => extname(splitCueTrackPath(filePath).cuePath).toLowerCase() === '.cue';
 
-const parseCueSheetText = (
+export const parseCueSheetText = (
   text: string,
   cuePath: string,
-  options: { source: CueTrackSource; sourceAudioPath?: string | null },
+  options: { source: CueTrackSource; sourceAudioPath?: string | null; fileExists?: (path: string) => boolean },
 ): CueSheet => {
   const cueDir = dirname(cuePath);
   let album: string | null = null;
@@ -222,6 +224,7 @@ const parseCueSheetText = (
         title: string | null;
         performer: string | null;
         audioPath: string | null;
+        pregapStartSeconds: number | null;
         startSeconds: number | null;
       }
     | null = null;
@@ -253,6 +256,7 @@ const parseCueSheetText = (
       performer: currentTrack.performer,
       album,
       albumArtist,
+      pregapStartSeconds: currentTrack.pregapStartSeconds,
       startSeconds: currentTrack.startSeconds,
       endSeconds: null,
     });
@@ -280,6 +284,7 @@ const parseCueSheetText = (
         title: null,
         performer: null,
         audioPath: currentAudioPath,
+        pregapStartSeconds: null,
         startSeconds: null,
       };
       continue;
@@ -305,6 +310,12 @@ const parseCueSheetText = (
       continue;
     }
 
+    const pregapIndexMatch = line.match(/^INDEX\s+00\s+(\d+:\d{2}:\d{2})$/iu);
+    if (pregapIndexMatch && currentTrack) {
+      currentTrack.pregapStartSeconds = parseIndexTime(pregapIndexMatch[1]);
+      continue;
+    }
+
     const indexMatch = line.match(/^INDEX\s+01\s+(\d+:\d{2}:\d{2})$/iu);
     if (indexMatch && currentTrack) {
       currentTrack.startSeconds = parseIndexTime(indexMatch[1]);
@@ -313,7 +324,13 @@ const parseCueSheetText = (
 
   commitTrack();
 
-  const filteredTracks = tracks.filter((track) => existsSync(track.audioPath));
+  const exists = options.fileExists ?? existsSync;
+  const resolvedSources = new Map<string, string>();
+  const filteredTracks = tracks.map(track => {
+    let audioPath = resolvedSources.get(track.audioPath);
+    if (!audioPath) { audioPath = resolveCueAudioSource(track.audioPath, exists); resolvedSources.set(track.audioPath, audioPath); }
+    return audioPath === track.audioPath ? track : { ...track, audioPath };
+  }).filter(track => exists(track.audioPath));
   return {
     cuePath,
     title: album,

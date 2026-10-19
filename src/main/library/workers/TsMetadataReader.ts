@@ -1,11 +1,11 @@
 import { open, stat } from 'node:fs/promises';
-import { basename, dirname, extname } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
 import iconv from 'iconv-lite';
 import { parseFile } from 'music-metadata';
 import type { IAudioMetadata } from 'music-metadata';
 import { shouldPreferTagLibForAlacTechnicalFields } from '../../audio/AlacTechnicalMetadata';
 import { normalizeAudioSampleRate } from '../../audio/SampleRateGuards';
-import { resolveCueTrack } from '../../audio/CueSheet';
+import { createCueTrackPath, resolveCueTrack } from '../../audio/CueSheet';
 import { resolveMp4ContainerAudioCodec } from '../../audio/Mp4AudioCodec';
 import type { EmbeddedCoverData, FieldSource, FieldSources, MetadataFields, MetadataResult } from '../libraryTypes';
 import type { MetadataReader, MetadataReadOptions } from './MetadataReader';
@@ -1270,7 +1270,7 @@ const fallbackFields = (filePath: string): MetadataResult => {
 export class TsMetadataReader implements MetadataReader {
   async read(filePath: string, options: MetadataReadOptions = {}): Promise<MetadataResult> {
     const readCover = options.readCover !== false;
-    const result = await this.readInternal(filePath, readCover);
+    const result = await this.readInternal(filePath, readCover, options.cueTrack);
     if (readCover || !result.embeddedCover) {
       return result;
     }
@@ -1279,8 +1279,11 @@ export class TsMetadataReader implements MetadataReader {
     return metadataOnly;
   }
 
-  private async readInternal(filePath: string, readCover: boolean): Promise<MetadataResult> {
-    const cueTrack = resolveCueTrack(filePath);
+  private async readInternal(filePath: string, readCover: boolean, preparedCue?: MetadataReadOptions['cueTrack']): Promise<MetadataResult> {
+    if (preparedCue && createCueTrackPath(preparedCue.cuePath, preparedCue.trackNumber) !== resolve(filePath)) {
+      throw new Error('Prepared CUE facts do not match the requested track.');
+    }
+    const cueTrack = preparedCue ?? resolveCueTrack(filePath);
     const metadataPath = cueTrack?.audioPath ?? filePath;
 
     try {
