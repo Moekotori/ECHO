@@ -976,6 +976,7 @@ void PcmRingAudioSource::addAutomixToOutput(int startFrame, int frameCount, echo
         return;
 
     const float* source = automixBuffer.data() + static_cast<size_t>(startFrame * channels);
+    const float outputGain = gain.load(std::memory_order_acquire);
     const float deckReplayGain = automixPlan.nextReplayGain.load(std::memory_order_acquire);
     const int outputChannels = output.getNumChannels();
 
@@ -987,6 +988,7 @@ void PcmRingAudioSource::addAutomixToOutput(int startFrame, int frameCount, echo
         for (int frame = 0; frame < frameCount; ++frame)
         {
             destination[frame] += source[frame * channels + sourceChannel]
+                * outputGain
                 * deckReplayGain
                 * nextAutomixEnvelope(absoluteStartFrame + static_cast<uint64_t>(frame));
         }

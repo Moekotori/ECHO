@@ -2454,6 +2454,38 @@ void testNativeAutomixDeckMixesNextBeforeCurrentEnds()
     require(source.isDrained(), "native automix must drain only after next deck ends");
 }
 
+void testNativeAutomixNextDeckFollowsMasterVolume()
+{
+    echo::EqProcessor eqProcessor;
+    echo::ChannelBalanceProcessor channelBalanceProcessor;
+    PcmRingAudioSource source(2, 64, 0, 0, 0.25f, eqProcessor, channelBalanceProcessor);
+    source.beginSession();
+    require(source.prepareAutomixFrames(0, 2, 0.0, 0.0), "volume test must arm AutoMix");
+    const std::vector<float> current(8, 0.0f);
+    const std::vector<float> next(16, 0.5f);
+    require(source.push(current.data(), 4), "volume test must accept current deck");
+    require(source.pushAutomixNext(next.data(), 8), "volume test must accept next deck");
+    source.markInputEnded();
+    source.markAutomixNextEnded();
+
+    auto output = makeBuffer(2, 4);
+    require(source.renderPlanar(output, 0, 4) == 4, "volume test must render through fade");
+    require(std::abs(output.getSample(0, 1) - 0.125f * std::sin(0.25f * 3.14159265f)) <= nearTolerance,
+        "next deck must obey master volume during overlap");
+    require(std::abs(output.getSample(0, 3) - 0.125f) <= nearTolerance,
+        "next deck must obey master volume after transition");
+
+    source.setGain(0.5f);
+    require(source.renderPlanar(output, 0, 2) == 2, "next deck must continue after current ends");
+    require(std::abs(output.getSample(1, 0) - 0.25f) <= nearTolerance,
+        "volume changes must apply to the already buffered next deck");
+    source.setGain(0.0f);
+    require(source.renderPlanar(output, 0, 2) == 2, "muted next deck must still advance");
+    require(std::abs(output.getSample(0, 0)) <= nearTolerance
+        && std::abs(output.getSample(1, 1)) <= nearTolerance,
+        "master mute must silence both channels of the next deck");
+}
+
 void testNativeAutomixAppliesUserDspOnceAfterDeckSum()
 {
     echo::EqProcessor eqProcessor;
@@ -3404,6 +3436,7 @@ int main()
         { "native render adapter", testNativeRenderAdapter },
         { "PCM declick ramp", testPcmDeclickRampOnSessionStartAndStop },
         { "native automix mixes next deck", testNativeAutomixDeckMixesNextBeforeCurrentEnds },
+        { "native automix next deck follows master volume", testNativeAutomixNextDeckFollowsMasterVolume },
         { "native automix applies DSP once after deck sum", testNativeAutomixAppliesUserDspOnceAfterDeckSum },
         { "native automix applies ReplayGain per deck", testNativeAutomixAppliesReplayGainPerDeckWithoutGlobalDoubleProcessing },
         { "native automix next deck respects current buffer", testNativeAutomixNextDeckCannotAdvancePastCurrentBuffer },
