@@ -790,7 +790,10 @@ export class LibraryService {
   }
 
   refreshDuplicateTracksAsync(mode: DuplicateTrackMode = 'strict'): Promise<DuplicateTrackIndexSummary> {
-    return this.store.refreshDuplicateTracksAsync(mode);
+    return this.store.refreshDuplicateTracksAsync(mode).catch(error => {
+      if (error instanceof LibraryMaintenanceInterrupted) this.scheduleDuplicateRefresh(mode);
+      throw error;
+    });
   }
 
   refreshDuplicateTracksPlaybackSafe(mode: DuplicateTrackMode = 'strict'): Promise<DuplicateTrackIndexSummary> {
@@ -2971,7 +2974,12 @@ export class LibraryService {
       await runMainBackgroundTask(`library:refresh-duplicate-tracks:${mode}`, () => this.refreshDuplicateTracksAsync(mode));
       this.notifyLibraryChanged();
     } catch (error) {
-      console.warn(`[library] Deferred duplicate refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof LibraryMaintenanceInterrupted) {
+        this.duplicateRefreshRunning.delete(mode);
+        this.scheduleDuplicateRefresh(mode);
+      } else {
+        console.warn(`[library] Deferred duplicate refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     } finally {
       this.duplicateRefreshRunning.delete(mode);
     }

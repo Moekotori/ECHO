@@ -57,7 +57,7 @@ describe('cooperative library maintenance', () => {
     expect(visibleId).toEqual(oldId);
     expect(responsive).toBe(true);
     expect(grouping()).toEqual(before);
-    expect(database.prepare('PRAGMA database_list').all()).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'echo_library_work' })]));
+    expect(database.prepare<[], { name: string }>('PRAGMA database_list').all().some(row => row.name.startsWith('echo_library_work_'))).toBe(false);
   });
 
   it('discards stale staging after a concurrent edit and can retry without losing the edit', async () => {
@@ -74,6 +74,18 @@ describe('cooperative library maintenance', () => {
     expect(grouping()).toEqual(before);
     await store.refreshGroupingCooperatively(albums);
     expect(database.prepare("SELECT title FROM albums WHERE title = 'Edited Album'").get()).toEqual({ title: 'Edited Album' });
+  });
+
+  it('marks missing paths in pages, yields, and protects inaccessible directories', async () => {
+    const { store, folder, ids } = fixture(1200);
+    const retained = ids.slice(0, 500).map((_id, index) => join(folder.path, `${index}.flac`));
+    database.prepare('UPDATE tracks SET path = ? WHERE id = ?').run(join(folder.path, 'offline', 'song.flac'), 'track-1199');
+    let ticks = 0;
+    const count = await store.markTracksMissingFromFolderCooperatively(folder.id, retained, undefined,
+      { excludeDirectories: [join(folder.path, 'offline')] }, () => { ticks += 1; });
+    expect(count).toBe(699);
+    expect(ticks).toBeGreaterThan(3);
+    expect(database.prepare('SELECT missing FROM tracks WHERE id = ?').get('track-1199')).toEqual({ missing: 0 });
   });
 
   it('publishes inbox batches only when complete and removes a cancelled partial batch', async () => {

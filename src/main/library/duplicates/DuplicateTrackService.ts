@@ -1,3 +1,5 @@
+import { runSteps } from '../CooperativeSteps';
+import { LibraryMaintenanceWorkspace } from '../LibraryMaintenanceWorkspace';
 import { randomUUID } from 'node:crypto';
 import { setImmediate as yieldToMainLoop } from 'node:timers/promises';
 import type { EchoDatabase } from '../../database/createDatabase';
@@ -42,7 +44,6 @@ type DuplicateTrackCleanupGroupBuilder = {
 
 const nowIso = (): string => new Date().toISOString();
 const DUPLICATE_SCAN_TRACK_YIELD_INTERVAL = 250;
-const DUPLICATE_SCAN_BUCKET_YIELD_INTERVAL = 50;
 const DUPLICATE_SCAN_GROUP_YIELD_INTERVAL = 50;
 const textOrNull = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
@@ -104,12 +105,23 @@ export class DuplicateTrackService {
 
   async rebuildDuplicateTrackIndexAsync(mode: DuplicateTrackMode = 'strict'): Promise<DuplicateTrackIndexSummary> {
     const normalizedMode = normalizeMode(mode);
-    const updatedAt = nowIso();
-    const tracks = this.loadActiveTracks();
-    await yieldToMainLoop();
-    const clusters = await this.buildStrictClustersAsync(tracks);
-
-    return this.persistDuplicateTrackIndex(normalizedMode, updatedAt, tracks.length, clusters);
+    const workspace = new LibraryMaintenanceWorkspace(this.database);
+    try {
+      const { clusters, totalTracksScanned } = await workspace.run(this.buildStrictClustersSteps(workspace));
+      workspace.check();
+      workspace.snapshot('duplicate_groups', 'SELECT * FROM main.duplicate_track_groups WHERE 0');
+      workspace.snapshot('duplicate_members', 'SELECT * FROM main.duplicate_track_members WHERE 0');
+      const summary = await workspace.run(this.persistDuplicateTrackIndexSteps(
+        normalizedMode, nowIso(), totalTracksScanned, clusters, workspace,
+      ));
+      workspace.commit(() => {
+        this.database.prepare('DELETE FROM duplicate_track_members WHERE group_id IN (SELECT id FROM duplicate_track_groups WHERE mode = ?)').run(normalizedMode);
+        this.database.prepare('DELETE FROM duplicate_track_groups WHERE mode = ?').run(normalizedMode);
+        this.database.exec(`INSERT INTO duplicate_track_groups SELECT * FROM ${workspace.table('duplicate_groups')};
+          INSERT INTO duplicate_track_members SELECT * FROM ${workspace.table('duplicate_members')}`);
+      });
+      return summary;
+    } finally { workspace.close(); }
   }
 
   private persistDuplicateTrackIndex(
@@ -118,88 +130,100 @@ export class DuplicateTrackService {
     totalTracksScanned: number,
     clusters: DuplicateTrackCandidate[][],
   ): DuplicateTrackIndexSummary {
-    return this.database.transaction(() => {
+    return this.database.transaction(() => runSteps(
+      this.persistDuplicateTrackIndexSteps(normalizedMode, updatedAt, totalTracksScanned, clusters),
+    ))();
+  }
+
+  private *persistDuplicateTrackIndexSteps(
+    normalizedMode: DuplicateTrackMode, updatedAt: string, totalTracksScanned: number,
+    clusters: DuplicateTrackCandidate[][], workspace?: LibraryMaintenanceWorkspace,
+  ): Generator<void, DuplicateTrackIndexSummary, void> {
+    if (!workspace) {
       this.database.prepare('DELETE FROM duplicate_track_members WHERE group_id IN (SELECT id FROM duplicate_track_groups WHERE mode = ?)').run(normalizedMode);
       this.database.prepare('DELETE FROM duplicate_track_groups WHERE mode = ?').run(normalizedMode);
 
-      let duplicateMembers = 0;
-      let hiddenTracks = 0;
+    }
+    let duplicateMembers = 0;
+    let writtenMembers = 0;
+    let hiddenTracks = 0;
 
-      for (const cluster of clusters) {
-        const median = medianDuration(cluster);
-        const duplicateKey = `${normalizedMode}\u0000${createStrictDuplicateClusterKey(cluster[0]!, median)}`;
-        const ranked = [...cluster]
-          .map((track) => ({
-            track,
-            qualityScore: scoreTrackQuality(track),
-          }))
-          .sort((a, b) => {
-            const qualityDelta = b.qualityScore - a.qualityScore;
-            if (qualityDelta !== 0) {
-              return qualityDelta;
-            }
+    for (const cluster of clusters) {
+      const median = medianDuration(cluster);
+      const duplicateKey = `${normalizedMode}\u0000${createStrictDuplicateClusterKey(cluster[0]!, median)}`;
+      const ranked = [...cluster]
+        .map((track) => ({
+          track,
+          qualityScore: scoreTrackQuality(track),
+        }))
+        .sort((a, b) => {
+          const qualityDelta = b.qualityScore - a.qualityScore;
+          if (qualityDelta !== 0) {
+            return qualityDelta;
+          }
 
-            const durationDelta = Math.abs(a.track.duration - median) - Math.abs(b.track.duration - median);
-            if (durationDelta !== 0) {
-              return durationDelta;
-            }
+          const durationDelta = Math.abs(a.track.duration - median) - Math.abs(b.track.duration - median);
+          if (durationDelta !== 0) {
+            return durationDelta;
+          }
 
-            const sizeDelta = (b.track.sizeBytes ?? 0) - (a.track.sizeBytes ?? 0);
-            if (sizeDelta !== 0) {
-              return sizeDelta;
-            }
+          const sizeDelta = (b.track.sizeBytes ?? 0) - (a.track.sizeBytes ?? 0);
+          if (sizeDelta !== 0) {
+            return sizeDelta;
+          }
 
-            return (a.track.path ?? '').localeCompare(b.track.path ?? '');
-          });
-        const groupId = randomUUID();
-        const representativeTrackId = ranked[0]!.track.id;
-        const groupReasons = ['strict_title_artist_duration_cluster'];
+          return (a.track.path ?? '').localeCompare(b.track.path ?? '');
+        });
+      const groupId = randomUUID();
+      const representativeTrackId = ranked[0]!.track.id;
+      const groupReasons = ['strict_title_artist_duration_cluster'];
 
+      this.database
+        .prepare(
+          `INSERT INTO ${workspace?.table('duplicate_groups') ?? 'duplicate_track_groups'} (
+            id, mode, duplicate_key, representative_track_id, track_count, hidden_count,
+            confidence, reasons_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          groupId,
+          normalizedMode,
+          duplicateKey,
+          representativeTrackId,
+          ranked.length,
+          ranked.length - 1,
+          1,
+          JSON.stringify(groupReasons),
+          updatedAt,
+          updatedAt,
+        );
+
+      for (const [index, entry] of ranked.entries()) {
+        const rank = index + 1;
+        const hidden = rank > 1 ? 1 : 0;
+        const reasons = rank === 1 ? ['representative_highest_quality'] : ['hidden_lower_quality_duplicate'];
         this.database
           .prepare(
-            `INSERT INTO duplicate_track_groups (
-              id, mode, duplicate_key, representative_track_id, track_count, hidden_count,
-              confidence, reasons_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO ${workspace?.table('duplicate_members') ?? 'duplicate_track_members'} (
+              group_id, track_id, quality_score, rank, hidden, reasons_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(
-            groupId,
-            normalizedMode,
-            duplicateKey,
-            representativeTrackId,
-            ranked.length,
-            ranked.length - 1,
-            1,
-            JSON.stringify(groupReasons),
-            updatedAt,
-            updatedAt,
-          );
-
-        ranked.forEach((entry, index) => {
-          const rank = index + 1;
-          const hidden = rank > 1 ? 1 : 0;
-          const reasons = rank === 1 ? ['representative_highest_quality'] : ['hidden_lower_quality_duplicate'];
-          this.database
-            .prepare(
-              `INSERT INTO duplicate_track_members (
-                group_id, track_id, quality_score, rank, hidden, reasons_json, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(groupId, entry.track.id, entry.qualityScore, rank, hidden, JSON.stringify(reasons), updatedAt, updatedAt);
-          duplicateMembers += 1;
-          hiddenTracks += hidden;
-        });
+          .run(groupId, entry.track.id, entry.qualityScore, rank, hidden, JSON.stringify(reasons), updatedAt, updatedAt);
+        duplicateMembers += 1;
+        hiddenTracks += hidden;
+        if (++writtenMembers % 250 === 0) yield;
       }
+      yield;
+    }
 
-      return {
-        mode: normalizedMode,
-        totalTracksScanned,
-        duplicateGroups: clusters.length,
-        duplicateMembers,
-        hiddenTracks,
-        updatedAt,
-      };
-    })();
+    return {
+      mode: normalizedMode,
+      totalTracksScanned,
+      duplicateGroups: clusters.length,
+      duplicateMembers,
+      hiddenTracks,
+      updatedAt,
+    };
   }
 
   getDuplicateGroupForTrack(trackId: string): DuplicateTrackGroup | null {
@@ -302,7 +326,7 @@ export class DuplicateTrackService {
         WHERE duplicate_track_groups.mode = ?
         ORDER BY duplicate_track_groups.updated_at DESC, duplicate_track_groups.id ASC, duplicate_track_members.rank ASC`,
       )
-      .all(normalizedMode);
+      .iterate(normalizedMode);
 
     const builders = new Map<string, DuplicateTrackCleanupGroupBuilder>();
 
@@ -364,9 +388,11 @@ export class DuplicateTrackService {
   async scanCleanupPreview(mode: DuplicateTrackMode = 'strict'): Promise<DuplicateTrackCleanupPreview> {
     const normalizedMode = normalizeMode(mode);
     const updatedAt = nowIso();
-    const tracks = this.loadActiveTracks();
-    await yieldToMainLoop();
-    const clusters = await this.buildStrictClustersAsync(tracks);
+    const workspace = new LibraryMaintenanceWorkspace(this.database);
+    let candidates: { clusters: DuplicateTrackCandidate[][]; totalTracksScanned: number };
+    try { candidates = await workspace.run(this.buildStrictClustersSteps(workspace)); }
+    finally { workspace.close(); }
+    const { clusters, totalTracksScanned } = candidates;
     const groups: DuplicateTrackCleanupPreview['groups'] = [];
     let duplicateMembers = 0;
     let hiddenTracks = 0;
@@ -406,7 +432,7 @@ export class DuplicateTrackService {
     return {
       summary: {
         mode: normalizedMode,
-        totalTracksScanned: tracks.length,
+        totalTracksScanned,
         duplicateGroups: groups.length,
         duplicateMembers,
         hiddenTracks,
@@ -421,17 +447,27 @@ export class DuplicateTrackService {
   }
 
   private loadActiveTracks(): DuplicateTrackCandidate[] {
-    return this.database
-      .prepare<[], DbRow>(
-        `SELECT
-          id, path, title, artist, album, album_artist, track_no, disc_no, year, genre,
+    return Array.from(this.iterateActiveTracks());
+  }
+
+  private *iterateActiveTracks(): Generator<DuplicateTrackCandidate> {
+    let rowId = 0;
+    const read = this.database.prepare<[number], DbRow>(`SELECT
+          rowid AS duplicate_row_id, id, path, title, artist, album, album_artist, track_no, disc_no, year, genre,
           duration, codec, sample_rate, bit_depth, bitrate, cover_id, size_bytes, metadata_status,
           embedded_metadata_status, embedded_cover_status, network_metadata_status, field_sources_json
         FROM tracks
-        WHERE missing = 0`,
-      )
-      .all()
-      .map((row) => ({
+        WHERE missing = 0 AND rowid > ? ORDER BY rowid LIMIT 250`);
+    for (;;) {
+      const rows = read.all(rowId);
+      if (!rows.length) return;
+      rowId = Number(rows[rows.length - 1]!.duplicate_row_id);
+      for (const row of rows) yield this.mapCandidate(row);
+    }
+  }
+
+  private mapCandidate(row: DbRow): DuplicateTrackCandidate {
+    return {
         id: String(row.id),
         path: String(row.path),
         title: String(row.title),
@@ -454,7 +490,7 @@ export class DuplicateTrackService {
         embeddedCoverStatus: this.mapEmbeddedStatus(row.embedded_cover_status),
         networkMetadataStatus: this.mapNetworkStatus(row.network_metadata_status),
         fieldSources: parseJsonObject(row.field_sources_json),
-      }));
+      };
   }
 
   private buildStrictClusters(tracks: DuplicateTrackCandidate[]): DuplicateTrackCandidate[][] {
@@ -478,13 +514,14 @@ export class DuplicateTrackService {
     const clusters: DuplicateTrackCandidate[][] = [];
 
     for (const bucket of buckets.values()) {
-      const sorted = [...bucket].sort((a, b) => a.duration - b.duration);
+      const sorted = bucket.sort((a, b) => a.duration - b.duration);
       let current: DuplicateTrackCandidate[] = [];
 
       for (const track of sorted) {
         const previous = current[current.length - 1];
         const canJoinByNeighbor = previous ? Math.abs(track.duration - previous.duration) <= 2 : true;
-        const canJoinCluster = current.every((candidate) => canStrictMergeTracks(candidate, track).duplicate);
+        // Sorted durations and a common title/artist/version signature make the first member the strictest bound.
+        const canJoinCluster = (current.length === 0 || canStrictMergeTracks(current[0]!, track).duplicate);
 
         if (current.length === 0 || (canJoinByNeighbor && canJoinCluster)) {
           current.push(track);
@@ -506,62 +543,60 @@ export class DuplicateTrackService {
     return clusters;
   }
 
-  private async buildStrictClustersAsync(tracks: DuplicateTrackCandidate[]): Promise<DuplicateTrackCandidate[][]> {
-    const buckets = new Map<string, DuplicateTrackCandidate[]>();
-
-    for (let index = 0; index < tracks.length; index += 1) {
-      const track = tracks[index]!;
-      const bucketKey = createStrictDuplicateBucketKey(track);
-
-      if (bucketKey) {
-        const bucket = buckets.get(bucketKey);
-        if (bucket) {
-          bucket.push(track);
-        } else {
-          buckets.set(bucketKey, [track]);
-        }
+  private *buildStrictClustersSteps(workspace: LibraryMaintenanceWorkspace): Generator<void, {
+    clusters: DuplicateTrackCandidate[][]; totalTracksScanned: number;
+  }, void> {
+    // Store rich candidate metadata on disk. Only a page and the current duplicate
+    // cluster are decoded in JS; unique songs do not accumulate in a library-sized Map.
+    workspace.snapshot('duplicate_candidates', "SELECT '' AS bucket_key, 0 AS duration, 0 AS ordinal, '' AS candidate_json WHERE 0");
+    this.database.exec(`CREATE UNIQUE INDEX ${workspace.table('duplicate_candidate_order')}
+      ON duplicate_candidates (bucket_key, duration, ordinal)`);
+    const insert = this.database.prepare(`INSERT INTO ${workspace.table('duplicate_candidates')}
+      (bucket_key, duration, ordinal, candidate_json) VALUES (?, ?, ?, ?)`);
+    let totalTracksScanned = 0;
+    for (const track of this.iterateActiveTracks()) {
+      totalTracksScanned += 1;
+      const key = createStrictDuplicateBucketKey(track);
+      if (key && Number.isFinite(track.duration) && track.duration > 0) {
+        insert.run(key, track.duration, totalTracksScanned, JSON.stringify(track));
       }
-
-      if (index % DUPLICATE_SCAN_TRACK_YIELD_INTERVAL === DUPLICATE_SCAN_TRACK_YIELD_INTERVAL - 1) {
-        await yieldToMainLoop();
-      }
+      if (totalTracksScanned % DUPLICATE_SCAN_TRACK_YIELD_INTERVAL === 0) yield;
     }
+    yield;
 
+    const read = this.database.prepare<[string, number, number], {
+      bucket_key: string; duration: number; ordinal: number; candidate_json: string;
+    }>(`SELECT bucket_key, duration, ordinal, candidate_json FROM ${workspace.table('duplicate_candidates')}
+      WHERE (bucket_key, duration, ordinal) > (?, ?, ?)
+      ORDER BY bucket_key, duration, ordinal LIMIT 250`);
+    let lastKey = '';
+    let lastDuration = -1;
+    let lastOrdinal = -1;
+    let currentKey = '';
+    let current: DuplicateTrackCandidate[] = [];
     const clusters: DuplicateTrackCandidate[][] = [];
-    let bucketIndex = 0;
-
-    for (const bucket of buckets.values()) {
-      const sorted = [...bucket].sort((a, b) => a.duration - b.duration);
-      let current: DuplicateTrackCandidate[] = [];
-
-      for (const track of sorted) {
-        const previous = current[current.length - 1];
-        const canJoinByNeighbor = previous ? Math.abs(track.duration - previous.duration) <= 2 : true;
-        const canJoinCluster = current.every((candidate) => canStrictMergeTracks(candidate, track).duplicate);
-
-        if (current.length === 0 || (canJoinByNeighbor && canJoinCluster)) {
-          current.push(track);
-          continue;
+    for (;;) {
+      const rows = read.all(lastKey, lastDuration, lastOrdinal);
+      if (!rows.length) break;
+      for (const row of rows) {
+        const track = JSON.parse(row.candidate_json) as DuplicateTrackCandidate;
+        // Sorted durations make the earliest member the strictest duration bound;
+        // title, artist and version equivalence are transitive within the cluster.
+        if (row.bucket_key !== currentKey || (current.length && !canStrictMergeTracks(current[0]!, track).duplicate)) {
+          if (current.length >= 2) clusters.push(current);
+          current = [];
+          currentKey = row.bucket_key;
         }
-
-        if (current.length >= 2) {
-          clusters.push(current);
-        }
-
-        current = [track];
+        current.push(track);
       }
-
-      if (current.length >= 2) {
-        clusters.push(current);
-      }
-
-      bucketIndex += 1;
-      if (bucketIndex % DUPLICATE_SCAN_BUCKET_YIELD_INTERVAL === 0) {
-        await yieldToMainLoop();
-      }
+      const last = rows[rows.length - 1]!;
+      lastKey = last.bucket_key;
+      lastDuration = last.duration;
+      lastOrdinal = last.ordinal;
+      yield;
     }
-
-    return clusters;
+    if (current.length >= 2) clusters.push(current);
+    return { clusters, totalTracksScanned };
   }
 
   private rankClusterByQuality(cluster: DuplicateTrackCandidate[], median: number): Array<{

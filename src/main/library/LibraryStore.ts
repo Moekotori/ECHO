@@ -2749,40 +2749,55 @@ export class LibraryStore {
 
   markTracksMissingFromFolder(
     folderId: string,
-    discoveredPaths: string[],
+    discoveredPaths: Iterable<string>,
     timestamp = nowIso(),
     options: MarkTracksMissingFromFolderOptions = {},
   ): number {
-    const normalizedPaths = new Set(discoveredPaths.map((filePath) => pathCompareValue(filePath)));
-    const excludedDirectories = (options.excludeDirectories ?? []).map((directoryPath) => resolve(directoryPath));
-    const existingRows = this.allRows('SELECT id, path FROM tracks WHERE folder_id = ? AND missing = 0', folderId);
-    const missingIds = existingRows
-      .filter((row) => {
-        const trackPath = String(row.path);
-        if (normalizedPaths.has(pathCompareValue(trackPath))) {
-          return false;
-        }
+    return runSteps(this.markTracksMissingSteps(folderId, discoveredPaths, timestamp, options));
+  }
 
-        return !excludedDirectories.some((directoryPath) => isPathInsideOrEqual(directoryPath, trackPath));
-      })
-      .map((row) => String(row.id));
+  markTracksMissingFromFolderCooperatively(
+    folderId: string,
+    discoveredPaths: Iterable<string>,
+    timestamp = nowIso(),
+    options: MarkTracksMissingFromFolderOptions = {},
+    check: () => void = () => undefined,
+  ): Promise<number> {
+    return runCooperativeSteps(this.markTracksMissingSteps(folderId, discoveredPaths, timestamp, options), check);
+  }
 
-    let changed = 0;
-
-    for (let index = 0; index < missingIds.length; index += 400) {
-      const batch = missingIds.slice(index, index + 400);
-      const placeholders = batch.map(() => '?').join(', ');
-      const result = this.run(
-        `UPDATE tracks
-         SET missing = 1, updated_at = ?
-         WHERE id IN (${placeholders})`,
-        timestamp,
-        ...batch,
-      );
-      changed += Number(result.changes ?? 0);
+  private *markTracksMissingSteps(
+    folderId: string, discoveredPaths: Iterable<string>, timestamp: string,
+    options: MarkTracksMissingFromFolderOptions,
+  ): Generator<void, number, void> {
+    const normalizedPaths = new Set<string>();
+    let processed = 0;
+    for (const path of discoveredPaths) {
+      normalizedPaths.add(pathCompareValue(path));
+      if (++processed % 400 === 0) yield;
     }
-
-    return changed;
+    const excludedDirectories = (options.excludeDirectories ?? []).map(path => resolve(path));
+    let rowId = 0;
+    let changed = 0;
+    for (;;) {
+      const rows = this.allRows(
+        'SELECT rowid AS scan_row_id, id, path FROM tracks WHERE folder_id = ? AND rowid > ? AND missing = 0 ORDER BY rowid LIMIT 400',
+        folderId, rowId,
+      );
+      if (!rows.length) return changed;
+      rowId = Number(rows[rows.length - 1]!.scan_row_id);
+      const missingIds = rows.filter(row => !normalizedPaths.has(pathCompareValue(String(row.path)))
+        && !excludedDirectories.some(directory => isPathInsideOrEqual(directory, String(row.path))))
+        .map(row => String(row.id));
+      if (missingIds.length) {
+        const placeholders = missingIds.map(() => '?').join(', ');
+        const result = this.run(
+          `UPDATE tracks SET missing = 1, updated_at = ? WHERE id IN (${placeholders})`, timestamp, ...missingIds,
+        );
+        changed += Number(result.changes ?? 0);
+      }
+      yield;
+    }
   }
 
   markTracksMissingByPaths(folderId: string, paths: string[], timestamp = nowIso()): number {
