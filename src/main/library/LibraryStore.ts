@@ -14,6 +14,7 @@ import {
   preloadSearchIndexRomanizer,
   type SearchIndexTrackFields,
 } from './SearchIndexTokens';
+import { hasSidecarCueTracks } from './CueTrackReferences';
 import { libraryTextSortKey } from './LibrarySortKey';
 import { normalizeAlbumTitleForLooseMerge, type AlbumKeyInput, type AlbumMergeStrategy, type AlbumService } from './AlbumService';
 import {
@@ -2417,6 +2418,10 @@ export class LibraryStore {
         if (Number(row.missing) === 0) yield resolve(String(row.path));
       }
     }
+  }
+
+  async hasSidecarCueTracks(folderId: string, isCurrent: () => boolean): Promise<boolean> {
+    return hasSidecarCueTracks((sql, ...parameters) => this.allRows(sql, ...parameters), folderId, isCurrent);
   }
 
   getTrackFingerprintsByFolder(folderId: string): Map<string, StoredTrackFingerprint> {

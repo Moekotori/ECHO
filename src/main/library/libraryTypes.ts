@@ -217,6 +217,11 @@ export type {
 };
 
 export type ScannedAudioFile = {
+  physicalAudioPath?: string;
+  physicalSizeBytes?: number;
+  physicalMtimeMs?: number;
+  cueTrack?: import('../audio/CueSheet').CueTrack;
+  cueDiscoveryComplete?: boolean;
   path: string;
   folderId: string;
   sizeBytes: number;

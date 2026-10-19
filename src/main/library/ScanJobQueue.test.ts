@@ -24,6 +24,14 @@ import { getEmbeddedCoverSourceHash, type CoverExtractor } from './workers/Cover
 import type { FileScanner } from './workers/FileScanner';
 import type { MetadataReader, MetadataReadOptions } from './workers/MetadataReader';
 
+// Most queue fixtures model scanner results without creating audio contents.
+vi.mock('./ScanCueReader', async importOriginal => {
+  const actual = await importOriginal<typeof import('./ScanCueReader')>();
+  const { existsSync } = await import('node:fs');
+  return { ...actual, readScanCueAsync: async (...args: Parameters<typeof actual.readScanCueAsync>) =>
+    args[1] && !existsSync(args[0]) ? { tracks: [] } : actual.readScanCueAsync(...args) };
+});
+
 const tempRoots: string[] = [];
 const previousSyncScanHealthCheckEnv = process.env.ECHO_SYNC_SCAN_HEALTH_CHECK;
 
@@ -685,7 +693,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.updates.map((update) => update.phase)).toEqual(
       expect.arrayContaining(['discovering', 'checking_cache', 'reading_metadata', 'extracting_covers', 'grouping_albums', 'writing_database', 'finished']),
     );
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(3);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(6);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
@@ -723,7 +731,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(metadataReader.paths).toEqual([]);
     expect(coverExtractor.cacheRoots).toEqual([]);
     expect(store.upsertedTracks).toEqual([]);
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(2);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
@@ -866,7 +874,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(metadataReader.paths).toEqual([]);
     expect(coverExtractor.cacheRoots).toEqual([]);
     expect(coverExtractor.repairCalls).toEqual(['repair-hash']);
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(2);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
   });
@@ -907,7 +915,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
       new CapturingCoverExtractor(), join(root, 'cache'), baseFolder(root),
       { changesOnly, reduceScanPressure: true, skipDeferredGroupingRefresh: true });
     expect(status.status).toBe('completed');
-    expect(store.cacheReadBatchSizes).toEqual([400, 400, 50]);
+    expect(store.cacheReadBatchSizes).toEqual([400, 400, 50, 400, 400, 50]);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(metadataReader.paths).toEqual([]);
     expect(eventLoopRan).toBe(true);
@@ -989,7 +997,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.upsertedTracks.map((track) => track.path)).toEqual([changedExistingFile.path, newFile.path]);
     expect(store.missingPaths).toEqual([deletedFile.path]);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(2);
     expect(Math.max(...store.updates.map((update) => update.totalFiles ?? 0))).toBe(2);
   });
 
@@ -1198,6 +1206,45 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(store.upsertedTracks.map((track) => track.path)).toEqual(expectedPaths);
     expect(store.upsertedTracks.every((track) => track.sizeBytes > audioFile.sizeBytes)).toBe(true);
     expect(store.missingPaths).toEqual([audioPath]);
+  });
+
+  it('protects indexed cue tracks on partial source failure while scanning other albums', async () => {
+    const root = makeTempRoot(); const folder = baseFolder(root);
+    const bad = join(folder.path, 'bad'); const good = join(folder.path, 'good');
+    mkdirSync(bad, { recursive: true }); mkdirSync(good);
+    const cue = join(bad, 'album.cue'); const audio = join(bad, 'album.flac'); const song = join(good, 'song.mp3');
+    writeFileSync(audio, 'audio'); writeFileSync(song, 'song');
+    writeFileSync(cue, 'FILE "album.flac" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nFILE "missing.flac" WAVE\nTRACK 02 AUDIO\nINDEX 01 00:00:00');
+    const files = [cue, audio, song].map(path => ({ path, sizeBytes: statSync(path).size, mtimeMs: Math.round(statMtimeMs(path)) }));
+    const indexed = [1, 2].map(number => ({ path: `${cue}#cueTrack=${number}`, sizeBytes: 1, mtimeMs: 1 }));
+    const store = new FakeStore(coverStateMap(indexed, file => coverState(file)));
+    const status = await runQueue(store, new FakeScanner(files), new FakeMetadataReader(),
+      new CapturingCoverExtractor(), join(root, 'cache'), folder);
+    expect(status.status).toBe('completed');
+    expect(status.errors.some(error => error.includes('cue_directory_deferred'))).toBe(true);
+    expect(store.missingPaths).toEqual([]);
+    expect(store.upsertedTracks.map(track => track.path)).toEqual([song]);
+  });
+
+  it.each([false, true])('rescans sidecar cue dependencies when only the physical audio changed (cross-directory=%s)', async crossDirectory => {
+    const root = makeTempRoot(); const folder = baseFolder(root);
+    mkdirSync(folder.path, { recursive: true });
+    const audioDir = crossDirectory ? join(folder.path, 'audio') : folder.path;
+    const cueDir = crossDirectory ? join(folder.path, 'sheets') : folder.path;
+    mkdirSync(audioDir, { recursive: true }); mkdirSync(cueDir, { recursive: true });
+    const audio = join(audioDir, 'album.flac'); const cue = join(cueDir, 'album.cue');
+    writeFileSync(audio, 'audio');
+    const declared = crossDirectory ? '../audio/album.wav' : 'album.wav';
+    writeFileSync(cue, `FILE "${declared}" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 01:00:00`);
+    const files = [audio, cue].map(path => ({ path, sizeBytes: statSync(path).size, mtimeMs: Math.round(statMtimeMs(path)) }));
+    const store = new FakeStore(); const reader = new FakeMetadataReader();
+    if (crossDirectory) Object.assign(store, { hasSidecarCueTracks: async () => true });
+    const status = await runPathsQueue(store, new FakeScanner(files), reader,
+      new CapturingCoverExtractor(), join(root, 'cache'), folder, [audio]);
+    expect(status.status).toBe('completed');
+    expect(store.upsertedTracks.map(track => track.path)).toEqual([`${cue}#cueTrack=1`, `${cue}#cueTrack=2`]);
+    expect(reader.options[0].cueTrack).toMatchObject({ audioPath: audio, startSeconds: 0, endSeconds: 60 });
+    expect(store.upsertedTracks.every(track => track.path !== audio)).toBe(true);
   });
 
   it('notifies when a scan job settles so renderer library views can refresh after completion', async () => {
@@ -1874,7 +1921,7 @@ describe('ScanJobQueue progress and cover memory behavior', () => {
     expect(status.skippedFiles).toBe(1);
     expect(store.missingPaths).toEqual([deletedFile.path]);
     expect(metadataReader.paths).toEqual([]);
-    expect(store.getTrackCacheStatesByPathsCalls).toBe(1);
+    expect(store.getTrackCacheStatesByPathsCalls).toBe(2);
     expect(store.getTrackCacheStatesByFolderCalls).toBe(0);
     expect(store.findTrackCoverStateCalls).toBe(0);
   });

@@ -9,7 +9,7 @@ import {
   type SearchIndexTrackFields,
 } from '../SearchIndexTokens';
 import type { CoverExtractor } from './CoverExtractor';
-import type { MetadataReader } from './MetadataReader';
+import type { MetadataReader, MetadataReadOptions } from './MetadataReader';
 import { TsCoverExtractor } from './TsCoverExtractor';
 import { TsMetadataReader } from './TsMetadataReader';
 import type {
@@ -279,14 +279,15 @@ export class WorkerBackedMetadataReader implements MetadataReader {
     private readonly logger: FallbackOnceLogger,
   ) {}
 
-  async read(filePath: string): Promise<MetadataResult> {
+  async read(filePath: string, options?: MetadataReadOptions): Promise<MetadataResult> {
     try {
       const result = await this.pool.run({
         type: 'metadata:read',
         filePath,
+        options,
       });
       if (result.status === 'error') {
-        const fallbackResult = await this.fallback.read(filePath);
+        const fallbackResult = await this.fallback.read(filePath, options);
         if (fallbackResult.status !== 'error') {
           this.logger.warn('metadata:read:error-result', result.errors[0] ?? 'worker returned metadata error');
           return fallbackResult;
@@ -295,7 +296,7 @@ export class WorkerBackedMetadataReader implements MetadataReader {
       return result;
     } catch (error) {
       this.logger.warn('metadata:read', error);
-      return this.fallback.read(filePath);
+      return this.fallback.read(filePath, options);
     }
   }
 }

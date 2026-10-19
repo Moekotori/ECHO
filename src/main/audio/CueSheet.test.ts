@@ -78,10 +78,47 @@ describe('CueSheet embedded CUESHEET support', () => {
       startSeconds: 154,
     });
   });
+
+  it('preserves an explicit INDEX 00 pregap without changing the playable INDEX 01 boundary', () => {
+    const root = makeTempRoot();
+    const cuePath = join(root, 'hidden-track.cue');
+    const audioPath = join(root, 'hidden-track.flac');
+    writeFileSync(audioPath, Buffer.from('audio'));
+    writeFileSync(cuePath, [
+      'FILE "hidden-track.flac" WAVE',
+      '  TRACK 01 AUDIO',
+      '    TITLE "Hidden Test"',
+      '    INDEX 00 00:00:00',
+      '    INDEX 01 00:42:00',
+    ].join('\n'));
+
+    expect(resolveCueTrack(createCueTrackPath(cuePath, 1))).toMatchObject({
+      trackNumber: 1,
+      pregapStartSeconds: 0,
+      startSeconds: 42,
+    });
+  });
 });
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
+});
+
+describe('lossless rip CUE source resolution', () => {
+  it('uses the only same-stem lossless file and preserves the CUE timeline', () => {
+    const root = makeTempRoot();
+    const audio = join(root, 'album.flac'); const cue = join(root, 'album.cue');
+    writeFileSync(audio, 'fixture');
+    writeFileSync(cue, 'FILE "album.wav" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 02:34:00');
+    const sheet = readCueSheet(cue);
+    expect(sheet.tracks.map(track => track.audioPath)).toEqual([resolve(audio), resolve(audio)]);
+    expect(sheet.tracks[0].endSeconds).toBe(154);
+    expect(sheet.tracks[1].startSeconds).toBe(154);
+    writeFileSync(join(root, 'album.ape'), 'fixture');
+    expect(readCueSheet(cue).tracks).toEqual([]);
+    const wave = join(root, 'album.wav'); writeFileSync(wave, 'fixture');
+    expect(readCueSheet(cue).tracks.map(track => track.audioPath)).toEqual([resolve(wave), resolve(wave)]);
+  });
 });
