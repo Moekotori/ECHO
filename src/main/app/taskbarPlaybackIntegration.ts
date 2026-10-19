@@ -308,7 +308,7 @@ export class TaskbarPlaybackIntegration {
         if (!existsSync(tempDir)) {
           mkdirSync(tempDir, { recursive: true });
         }
-        void import('sharp')
+        void import('../images/sharpRuntime')
           .then((sharp) => sharp.default(rawPath).resize(128, 128, { fit: 'cover' }).png().toFile(tempPngPath))
           .catch(() => undefined);
       } catch {

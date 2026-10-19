@@ -5,6 +5,11 @@ export function createAccountsApi(
   IpcChannels: Record<string, string>,
 ): NonNullable<EchoApi['accounts']> {
   return {
+    loginQobuz: (credentials) => ipcRenderer.invoke(IpcChannels.AccountLoginQobuz, credentials),
+    startNeteaseQrLogin: () => ipcRenderer.invoke(IpcChannels.AccountStartNeteaseQrLogin),
+    pollNeteaseQrLogin: (key) => ipcRenderer.invoke(IpcChannels.AccountPollNeteaseQrLogin, key),
+    setYouTubeBrowser: (browser) => ipcRenderer.invoke(IpcChannels.AccountSetYouTubeBrowser, browser),
+    setBrowser: (provider, browser) => ipcRenderer.invoke(IpcChannels.AccountSetBrowser, provider, browser),
     getStatuses: () => ipcRenderer.invoke(IpcChannels.AccountGetStatuses),
     getStatus: (provider) => ipcRenderer.invoke(IpcChannels.AccountGetStatus, provider),
     saveCookie: (provider, cookie) => ipcRenderer.invoke(IpcChannels.AccountSaveCookie, provider, cookie),

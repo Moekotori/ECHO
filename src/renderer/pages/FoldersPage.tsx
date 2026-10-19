@@ -1,8 +1,15 @@
+import { FolderSortControl } from './folders/FolderSortControl';
+import { FolderFilterControl, folderInsights } from './folders/FolderFilterControl';
+import type { LibraryFolderInsight } from '../../shared/types/library';
+import { sortRemotePreviewTracks } from './foldersRemotePreviewSort';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/folders.css';
 import type { CSSProperties, DragEvent, SetStateAction } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
+  Settings2,
+  X,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -44,9 +51,9 @@ import type {
 import { TrackContextMenu } from '../components/library/TrackContextMenu';
 import type { TrackMenuAction } from '../components/library/TrackContextMenu';
 import { OsuTimingPanel } from '../components/library/OsuTimingPanel';
+import { FolderWall, FolderViewSwitch, useFolderWallPreference, type FolderWallLocation, type FolderWallTarget } from './folders/FolderWall';
 import { TrackList } from '../components/library/TrackList';
 import { TrackTagEditorDrawer } from '../components/library/TrackTagEditorDrawer';
-import { StyledSelect } from '../components/ui/StyledSelect';
 import { useRemoteCoverPreloader } from '../hooks/useRemoteCoverPreloader';
 import {
   forgetLibraryScanStatus,
@@ -72,19 +79,7 @@ import {
   type LibraryScanTotals,
 } from '../utils/libraryScanProgress';
 
-type FolderTarget = {
-  folderId: string;
-  path: string;
-  name: string;
-  rootName: string;
-  rootPath: string;
-  importProfile?: LibraryFolderOverview['importProfile'];
-  trackCount: number;
-  childFolderCount: number;
-  totalDuration: number;
-  totalSizeBytes: number;
-  coverThumbs: string[];
-};
+type FolderTarget = FolderWallTarget;
 
 type TrackMenuState = {
   track: LibraryTrack;
@@ -334,6 +329,13 @@ type FolderSortOption = {
 };
 
 const sortOptions: FolderSortOption[] = [
+  { value: 'artistDesc', labelKey: 'songs.sort.artistDesc', groupKey: 'songs.sort.group.browse' },
+  { value: 'albumDesc', labelKey: 'songs.sort.albumDesc', groupKey: 'songs.sort.group.browse' },
+  { value: 'createdDesc', labelKey: 'library.sort.createdDesc', groupKey: 'songs.sort.group.library' },
+  { value: 'createdAsc', labelKey: 'library.sort.createdAsc', groupKey: 'songs.sort.group.library' },
+  { value: 'recent', labelKey: 'songs.sort.recent', groupKey: 'songs.sort.group.library' },
+  { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc', groupKey: 'songs.sort.group.library' },
+  { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc', groupKey: 'songs.sort.group.library' },
   { value: 'titleAsc', labelKey: 'songs.sort.titleAsc', groupKey: 'songs.sort.group.browse' },
   { value: 'titleDesc', labelKey: 'songs.sort.titleDesc', groupKey: 'songs.sort.group.browse' },
   { value: 'artist', labelKey: 'songs.sort.artist', groupKey: 'songs.sort.group.browse' },
@@ -829,6 +831,12 @@ export const FoldersPage = (): JSX.Element => {
   const { t } = useI18n();
   const remoteApi = getRemoteSourcesBridge();
   const [mode, setMode] = useState<FolderMode>('local');
+  const [folderWall, setFolderWall] = useFolderWallPreference();
+  const [wallDetail, setWallDetail] = useState(false);
+  const [wallLocation, setWallLocation] = useState<FolderWallLocation>({ trail: [] });
+  const [folderInspectorOpen, setFolderInspectorOpen] = useState(false);
+  const wallLayout = mode === 'local' && folderWall;
+  const showingWall = wallLayout && !wallDetail;
   const [overviews, setOverviews] = useState<LibraryFolderOverview[]>([]);
   const [folderRootOrderIds, setFolderRootOrderIds] = useState<string[]>(() => readFolderRootOrderMemory());
   const [childrenByParent, setChildrenByParentState] = useState<Record<string, LibraryFolderNode[]>>(
@@ -846,16 +854,10 @@ export const FoldersPage = (): JSX.Element => {
   const [hasMore, setHasMore] = useState(false);
   const { searchInput, setSearchInput, search, setSearch, searchInputProps } = useImeAwareDebouncedSearch(220);
   const [sort, setSort] = useState<LibrarySort>(() => readStoredLibrarySort(foldersSortStorageKey, validFolderSortValues));
-  const localizedSortOptions = useMemo(
-    () => sortOptions
-      .filter((option) => mode === 'local' || !option.localOnly)
-      .map((option) => ({
-        value: option.value,
-        label: option.label ? option.label(t) : t(option.labelKey!),
-        group: t(option.groupKey),
-      })),
-    [mode, t],
-  );
+
+  const [hideDuplicates, setHideDuplicates] = useState(false);
+  const [folderInsight, setFolderInsight] = useState<LibraryFolderInsight | null>(null);
+  const [isRefreshingDuplicates, setIsRefreshingDuplicates] = useState(false);
   const selectedSort = sort === 'default' || sort === 'title' || (mode === 'remote' && remoteUnsupportedFolderSortValues.has(sort))
     ? 'titleAsc'
     : sort;
@@ -893,6 +895,14 @@ export const FoldersPage = (): JSX.Element => {
   const [remoteItems, setRemoteItems] = useState<RemoteDirectoryItem[]>([]);
   const [remoteCachedTracks, setRemoteCachedTracks] = useState<LibraryTrack[]>([]);
   const [remoteFolderStats, setRemoteFolderStats] = useState<RemoteIndexedFolderStats | null>(null);
+  const hiddenFolderSorts = useMemo(() => {
+    if (mode !== 'remote') return undefined;
+    const hidden = new Set(remoteUnsupportedFolderSortValues);
+    if (!(remoteFolderStats && remoteFolderStats.trackCount > 0)) {
+      for (const value of ['createdAsc', 'createdDesc', 'recent', 'fileModifiedAsc', 'fileModifiedDesc'] as LibrarySort[]) hidden.add(value);
+    }
+    return hidden;
+  }, [mode, remoteFolderStats?.trackCount]);
   const [remotePage, setRemotePage] = useState(1);
   const [remoteHasMore, setRemoteHasMore] = useState(false);
   const [remoteNextCursor, setRemoteNextCursor] = useState<string | null>(null);
@@ -1074,60 +1084,7 @@ export const FoldersPage = (): JSX.Element => {
         track.path.toLocaleLowerCase().includes(normalizedSearch),
       );
 
-    if (sort === 'artist') {
-      return nextTracks.sort((left, right) => `${left.artist}\u0000${left.title}`.localeCompare(`${right.artist}\u0000${right.title}`));
-    }
-    if (sort === 'album') {
-      return nextTracks.sort((left, right) => `${left.album}\u0000${left.trackNo ?? 0}\u0000${left.title}`.localeCompare(`${right.album}\u0000${right.trackNo ?? 0}\u0000${right.title}`));
-    }
-    if (sort === 'trackNumber') {
-      return nextTracks.sort((left, right) =>
-        Number(left.trackNo == null) - Number(right.trackNo == null)
-        || (left.discNo ?? 1) - (right.discNo ?? 1)
-        || (left.trackNo ?? 0) - (right.trackNo ?? 0)
-        || left.title.localeCompare(right.title)
-        || left.path.localeCompare(right.path),
-      );
-    }
-    if (sort === 'yearAsc' || sort === 'yearDesc') {
-      const direction = sort === 'yearAsc' ? 1 : -1;
-      return nextTracks.sort((left, right) =>
-        Number(left.year == null) - Number(right.year == null)
-        || direction * ((left.year ?? 0) - (right.year ?? 0))
-        || left.title.localeCompare(right.title),
-      );
-    }
-    if (sort === 'qualityDesc') {
-      return nextTracks.sort((left, right) => (right.bitrate ?? 0) - (left.bitrate ?? 0));
-    }
-    if (sort === 'codecAsc' || sort === 'codecDesc') {
-      const direction = sort === 'codecAsc' ? 1 : -1;
-      return nextTracks.sort((left, right) => direction * (left.codec ?? '').localeCompare(right.codec ?? '') || left.title.localeCompare(right.title));
-    }
-    if (sort === 'audioSpecAsc' || sort === 'audioSpecDesc') {
-      const direction = sort === 'audioSpecAsc' ? 1 : -1;
-      return nextTracks.sort((left, right) => direction * (((left.sampleRate ?? 0) - (right.sampleRate ?? 0)) || ((left.bitDepth ?? 0) - (right.bitDepth ?? 0))) || left.title.localeCompare(right.title));
-    }
-    if (sort === 'bitrateAsc' || sort === 'bitrateDesc' || sort === 'qualityAsc') {
-      const direction = sort === 'bitrateDesc' ? -1 : 1;
-      return nextTracks.sort((left, right) => direction * ((left.bitrate ?? 0) - (right.bitrate ?? 0)) || left.title.localeCompare(right.title));
-    }
-    if (sort === 'bpmAsc' || sort === 'bpmDesc') {
-      const direction = sort === 'bpmAsc' ? 1 : -1;
-      return nextTracks.sort((left, right) => direction * ((left.bpm ?? 0) - (right.bpm ?? 0)) || left.title.localeCompare(right.title));
-    }
-    if (sort === 'durationAsc' || sort === 'durationDesc') {
-      const direction = sort === 'durationAsc' ? 1 : -1;
-      return nextTracks.sort((left, right) => direction * ((left.duration ?? 0) - (right.duration ?? 0)) || left.title.localeCompare(right.title));
-    }
-    if (sort === 'titleDesc') {
-      return nextTracks.sort((left, right) => right.title.localeCompare(left.title));
-    }
-    if (sort === 'random') {
-      return [...nextTracks].sort(() => Math.random() - 0.5);
-    }
-
-    return nextTracks.sort((left, right) => left.title.localeCompare(right.title));
+    return sortRemotePreviewTracks(nextTracks, sort);
   }, [remoteAudioItems, remoteCachedTracks, remoteFolderStats, remoteIndexedTracks, remotePreviewTracks, search, selectedRemoteSource, sort]);
   const folderViewMemoryKey = mode === 'local' && selected
     ? `local:${selected.folderId}:${normalizeLocalPathForCompare(selected.path)}`
@@ -1145,11 +1102,13 @@ export const FoldersPage = (): JSX.Element => {
     isRestoringFolderViewRef.current = true;
     try {
       const raw = window.localStorage.getItem(`echo-next.folder-view:${memoryKey}`);
-      const stored = raw ? JSON.parse(raw) as { search?: string; recursive?: boolean; sort?: LibrarySort } : null;
+      const stored = raw ? JSON.parse(raw) as { search?: string; recursive?: boolean; sort?: LibrarySort; hideDuplicates?: boolean; folderInsight?: LibraryFolderInsight } : null;
       const nextSearch = stored?.search ?? '';
       setSearchInput(nextSearch);
       setSearch(nextSearch.trim());
       setRecursive(stored?.recursive ?? true);
+      setHideDuplicates(stored?.hideDuplicates === true);
+      setFolderInsight(stored?.folderInsight && folderInsights.includes(stored.folderInsight) ? stored.folderInsight : null);
       const storedSort = stored?.sort && validFolderSortValues.has(stored.sort) ? stored.sort : 'default';
       setSort(mode === 'remote' && remoteUnsupportedFolderSortValues.has(storedSort) ? 'titleAsc' : storedSort);
     } catch {
@@ -1170,11 +1129,11 @@ export const FoldersPage = (): JSX.Element => {
       return;
     }
     try {
-      window.localStorage.setItem(`echo-next.folder-view:${memoryKey}`, JSON.stringify({ search: searchInput, recursive, sort }));
+      window.localStorage.setItem(`echo-next.folder-view:${memoryKey}`, JSON.stringify({ search: searchInput, recursive, sort, hideDuplicates, folderInsight }));
     } catch {
       // Per-folder view memory is optional in restricted storage environments.
     }
-  }, [recursive, searchInput, sort]);
+  }, [folderInsight, hideDuplicates, recursive, searchInput, sort]);
 
   const folderSource = useMemo(
     () =>
@@ -1185,11 +1144,13 @@ export const FoldersPage = (): JSX.Element => {
             folderId: selected.folderId,
             path: selected.path,
             recursive,
+            hideDuplicates,
+            folderInsight: folderInsight ?? undefined,
             search: search || undefined,
             sort,
           }
         : null,
-    [recursive, search, selected, sort, t],
+    [folderInsight, hideDuplicates, recursive, search, selected, sort, t],
   );
   const remoteSource = useMemo(
     () =>
@@ -1215,7 +1176,7 @@ export const FoldersPage = (): JSX.Element => {
 
   useEffect(() => {
     setSelectedTrackIds({});
-  }, [mode, recursive, search, selected?.folderId, selected?.path, selectedRemote?.sourceId, selectedRemote?.path, sort]);
+  }, [folderInsight, hideDuplicates, mode, recursive, search, selected?.folderId, selected?.path, selectedRemote?.sourceId, selectedRemote?.path, sort]);
 
   const refreshOverviews = useCallback(async (): Promise<void> => {
     const library = window.echo?.library;
@@ -1675,7 +1636,8 @@ export const FoldersPage = (): JSX.Element => {
       const library = window.echo?.library;
       const target = selected;
 
-      if (mode === 'remote') {
+      if (showingWall || mode === 'remote') {
+        trackRequestIdRef.current += 1;
         setTracks([]);
         setPage(1);
         setHasMore(false);
@@ -1700,6 +1662,8 @@ export const FoldersPage = (): JSX.Element => {
           folderId: target.folderId,
           path: target.path,
           recursive,
+          hideDuplicates,
+          folderInsight: folderInsight ?? undefined,
           page: nextPage,
           pageSize,
           search,
@@ -1723,7 +1687,7 @@ export const FoldersPage = (): JSX.Element => {
         }
       }
     },
-    [mode, recursive, search, selected, sort, t],
+    [folderInsight, hideDuplicates, mode, recursive, search, selected, showingWall, sort, t],
   );
 
   useEffect(() => {
@@ -1771,6 +1735,28 @@ export const FoldersPage = (): JSX.Element => {
       void refreshOverviews();
     }
   }, [refreshOverviews, scanStatuses]);
+
+  const applyFolderInsight = useCallback(async (next: LibraryFolderInsight | null): Promise<void> => {
+    if (isRefreshingDuplicates) return;
+    if (next !== 'duplicates') { setFolderInsight(next); return; }
+    setIsRefreshingDuplicates(true);
+    try {
+      await window.echo?.library?.refreshDuplicateTracks('strict');
+      setHideDuplicates(false); setFolderInsight(next);
+    } catch (value) { setError(formatFolderError(value, t)); }
+    finally { setIsRefreshingDuplicates(false); }
+  }, [isRefreshingDuplicates, t]);
+  const toggleHiddenDuplicates = useCallback(async (): Promise<void> => {
+    if (isRefreshingDuplicates) return;
+    if (hideDuplicates) { setHideDuplicates(false); return; }
+    setIsRefreshingDuplicates(true);
+    try {
+      await window.echo?.library?.refreshDuplicateTracks('strict');
+      if (folderInsight === 'duplicates') setFolderInsight(null);
+      setHideDuplicates(true);
+    } catch (value) { setError(formatFolderError(value, t)); }
+    finally { setIsRefreshingDuplicates(false); }
+  }, [folderInsight, hideDuplicates, isRefreshingDuplicates, t]);
 
   const fetchBulkTracks = useCallback(
     async (sortMode: LibrarySort): Promise<{ items: LibraryTrack[]; total: number; nextCursor?: string | null }> => {
@@ -1830,6 +1816,8 @@ export const FoldersPage = (): JSX.Element => {
           folderId: target.folderId,
           path: target.path,
           recursive,
+          hideDuplicates,
+          folderInsight: folderInsight ?? undefined,
           page: nextPage,
           pageSize: bulkPageSize,
           search,
@@ -1847,7 +1835,7 @@ export const FoldersPage = (): JSX.Element => {
 
       return { items: items.slice(0, maxBulkTracks), total: totalTracks };
     },
-    [mode, recursive, remoteApi, remoteTracks, search, selected, selectedRemote],
+    [folderInsight, hideDuplicates, mode, recursive, remoteApi, remoteTracks, search, selected, selectedRemote],
   );
 
   const handleSelectAllTracks = useCallback(async (): Promise<void> => {
@@ -1900,7 +1888,7 @@ export const FoldersPage = (): JSX.Element => {
       }
 
       const hasFolderSelection = mode === 'remote' ? Boolean(selectedRemote) : Boolean(selected);
-      if (!hasFolderSelection || activeTracks.length === 0) {
+      if (showingWall || !hasFolderSelection || activeTracks.length === 0) {
         return;
       }
 
@@ -1910,7 +1898,7 @@ export const FoldersPage = (): JSX.Element => {
 
     window.addEventListener('keydown', handleSelectAllKeyDown);
     return () => window.removeEventListener('keydown', handleSelectAllKeyDown);
-  }, [activeTracks.length, editingTrack, handleSelectAllTracks, isBulkLoading, isTagEditorOpen, mode, osuTimingTrack, selected, selectedRemote, trackMenu]);
+  }, [activeTracks.length, editingTrack, handleSelectAllTracks, isBulkLoading, isTagEditorOpen, mode, osuTimingTrack, selected, selectedRemote, showingWall, trackMenu]);
 
   const runBulkAction = useCallback(
     async (action: 'play' | 'shuffle' | 'append' | 'next'): Promise<void> => {
@@ -2304,6 +2292,28 @@ export const FoldersPage = (): JSX.Element => {
         return;
       }
 
+      if (folderContextMenu) {
+        event.preventDefault();
+        setFolderContextMenu(null);
+        return;
+      }
+      if (folderInspectorOpen) {
+        event.preventDefault();
+        setFolderInspectorOpen(false);
+        return;
+      }
+      if (wallLayout) {
+        event.preventDefault();
+        if (wallDetail) setWallDetail(false);
+        else {
+          const trail = wallLocation.trail.slice(0, -1);
+          setWallLocation({ trail });
+          const parent = trail.at(-1);
+          if (parent) setSelected(parent);
+        }
+        return;
+      }
+
       if (mode === 'remote') {
         if (!selectedRemote || !selectedRemoteSource || !remoteParentPath(selectedRemoteSource, selectedRemote.path)) {
           return;
@@ -2324,7 +2334,7 @@ export const FoldersPage = (): JSX.Element => {
 
     window.addEventListener('keydown', handleEscapeNavigation);
     return () => window.removeEventListener('keydown', handleEscapeNavigation);
-  }, [editingTrack, handleLocalUp, handleRemoteUp, isTagEditorOpen, mode, osuTimingTrack, selected, selectedOverview, selectedRemote, selectedRemoteSource, trackMenu]);
+  }, [editingTrack, folderContextMenu, folderInspectorOpen, handleLocalUp, handleRemoteUp, isTagEditorOpen, mode, osuTimingTrack, selected, selectedOverview, selectedRemote, selectedRemoteSource, trackMenu, wallDetail, wallLayout, wallLocation.trail]);
 
   const handleLoadMore = useCallback((): void => {
     if (mode === 'remote') {
@@ -2896,9 +2906,26 @@ export const FoldersPage = (): JSX.Element => {
   };
 
   return (
-    <div className="folders-workbench" ref={workbenchRef}>
-      <aside className="folders-sidebar">
+    <div className="folders-workbench" ref={workbenchRef} data-wall={wallLayout ? 'true' : undefined} data-wall-overview={showingWall ? 'true' : undefined}>
+      {wallLayout ? <header className="folder-wall-page-header">
+        <div className="folder-wall-title">
+          {wallDetail ? <button type="button" className="tool-button" aria-label="返回文件夹墙" title="返回文件夹墙（Esc）" onClick={() => setWallDetail(false)}><ArrowLeft size={18} /></button> : null}
+          <h1>{t('folders.sidebar.title')}</h1><span>{orderedOverviews.length} 个根目录</span>
+        </div>
+        <div className="folder-wall-page-actions">
+          <div className="folder-wall-source" role="group" aria-label="文件夹来源">
+            <button type="button" aria-pressed={true}>本地</button>
+            <button type="button" onClick={() => { if (remoteUnsupportedFolderSortValues.has(sort)) setSort('titleAsc'); setMode('remote'); setFolderInspectorOpen(false); }}>网盘</button>
+          </div>
+          <FolderViewSwitch wall={folderWall} onChange={(value) => { setFolderWall(value); setFolderInspectorOpen(false); setWallDetail(false); }} />
+          <button type="button" className="tool-button" title={t('folders.action.refresh')} aria-label={t('folders.action.refresh')} onClick={() => void refreshOverviews()}><RefreshCw size={17} className={isLoadingOverviews ? 'spinning-icon' : undefined} /></button>
+          <button type="button" className="secondary-action" disabled={isImportingFolder} onClick={() => void handleChooseFolder()}><FolderPlus size={16} />添加文件夹</button>
+          <button type="button" className="secondary-action" aria-label="文件夹管理" aria-expanded={folderInspectorOpen} aria-controls="folder-wall-inspector" onClick={() => setFolderInspectorOpen(!folderInspectorOpen)}><Settings2 size={16} />管理{hasRunningLocalScan ? <span className="folder-wall-scan-dot" /> : null}</button>
+        </div>
+      </header> : null}
+      <aside className="folders-sidebar" hidden={wallLayout}>
         <div className="folders-pane-header">
+          {mode === 'local' ? <FolderViewSwitch wall={folderWall} onChange={(value) => { setFolderWall(value); setWallDetail(false); }} /> : null}
           <div>
             <span className="panel-kicker">{mode === 'remote' ? '网盘' : t('folders.sidebar.kicker')}</span>
             <h1>{t('folders.sidebar.title')}</h1>
@@ -3095,6 +3122,15 @@ export const FoldersPage = (): JSX.Element => {
       ) : null}
 
       <main className="folders-main" data-has-bpm={hasVisibleBpm ? 'true' : 'false'}>
+        {showingWall ? <>
+          <FolderWall roots={orderedOverviews} location={wallLocation} onLocationChange={setWallLocation}
+            childrenByParent={childrenByParent} loadingChildren={loadingChildren} loading={isLoadingOverviews}
+            pinned={pinnedFolders} loadChildren={loadChildren} onSelect={setSelected}
+            onOpen={(target) => { setSelected(target); setWallDetail(true); }}
+            onContextMenu={(event, target) => { event.preventDefault(); setSelected(target); setFolderContextMenu({ target, position: { x: Math.max(8, Math.min(event.clientX, window.innerWidth - 202)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 280)) } }); }}
+            onAdd={() => void handleChooseFolder()} />
+          {error || message ? <div className="folders-status-line" role={error ? 'alert' : 'status'}>{error ?? message}</div> : null}
+        </> : <>
         <header
           className="folder-detail-header"
           data-has-backdrop={selectedCovers.length > 0}
@@ -3168,13 +3204,11 @@ export const FoldersPage = (): JSX.Element => {
               </button>
             </div>
           )}
-          <StyledSelect
-            className="folder-sort-control"
-            value={selectedSort}
-            options={localizedSortOptions}
-            onChange={setSort}
-            ariaLabel={t('folders.filters.label')}
-          />
+          <FolderSortControl className="folder-sort-control" value={hiddenFolderSorts?.has(selectedSort) ? 'titleAsc' : selectedSort} hiddenValues={hiddenFolderSorts}
+            onChange={setSort} ariaLabel={t('folders.filters.label')} />
+          {mode === 'local' ? <FolderFilterControl value={folderInsight} hideDuplicates={hideDuplicates}
+            busy={isRefreshingDuplicates} onChange={(value) => void applyFolderInsight(value)}
+            onToggleDuplicates={() => void toggleHiddenDuplicates()} /> : null}
         </section>
 
         <div className="folder-track-columns" aria-label={t('folders.sort.columnsAria')}>
@@ -3242,9 +3276,11 @@ export const FoldersPage = (): JSX.Element => {
             <span>{error ?? message ?? (isBulkLoading ? t('folders.statusLine.preparingQueue') : mode === 'remote' ? '正在读取网盘目录...' : t('folders.statusLine.loadingTracks'))}</span>
           </div>
         ) : null}
+        </>}
       </main>
 
-      <aside className="folders-actions-panel">
+      <aside className="folders-actions-panel" hidden={wallLayout && !folderInspectorOpen} id="folder-wall-inspector" data-open={folderInspectorOpen ? 'true' : undefined} aria-label="文件夹管理">
+        {wallLayout ? <div className="folder-wall-inspector-heading"><div><strong>文件夹管理</strong><span title={selected?.path}>{selected?.name ?? '未选择文件夹'}</span></div><button type="button" className="tool-button" aria-label="关闭文件夹管理" onClick={() => setFolderInspectorOpen(false)}><X size={18} /></button></div> : null}
         {mode === 'local' ? (
           <section className="folder-import-section">
             <div className="folders-panel-heading">

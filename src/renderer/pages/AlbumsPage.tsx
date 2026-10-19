@@ -1,7 +1,11 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLibraryPageRefresh } from '../hooks/useLibraryPageRefresh';
+import { LibraryWallFilterControl } from '../components/library/LibraryWallFilterControl';
+import { AlbumsSortControl, validAlbumSortValues } from './albums/AlbumsSortControl';
+import { readAlbumFilterSession, writeAlbumFilterSession } from './albums/albumFilterSession';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Check, ChevronDown, Disc3, ListFilter, RefreshCw, Search } from 'lucide-react';
+import { Disc3, RefreshCw, Search } from 'lucide-react';
 import type { AppSettings } from '../../shared/types/appSettings';
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import type { EditableAlbumTags, LibraryAlbum, LibraryPlaylist, LibrarySort, LibraryTrack } from '../../shared/types/library';
@@ -10,19 +14,19 @@ import { AlbumContextMenu } from '../components/album/AlbumContextMenu';
 import type { AlbumMenuAction } from '../components/album/AlbumContextMenu';
 import { AlbumDetailView } from '../components/album/AlbumDetailView';
 import { AlbumTagEditorDrawer } from '../components/album/AlbumTagEditorDrawer';
-import { LibrarySourceSwitch } from '../components/library/LibrarySourceSwitch';
-import { RemoteSourceFilter } from '../components/library/RemoteSourceFilter';
 import { DeferredWallImage, useScrollImagePause } from '../components/ui/DeferredWallImage';
 import { getPageScrollContainer, InfiniteScrollSentinel, readPageScrollTop } from '../components/ui/InfiniteScrollSentinel';
 import { likedAlbumsChangedEvent, likedChangedEvent } from '../hooks/useLikedMedia';
 import { useI18n } from '../i18n/I18nProvider';
-import type { TranslationKey } from '../i18n/locales';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { albumDetailNavigationEvent, consumePendingAlbumDetailNavigation, peekPendingAlbumDetailNavigation, type DetailReturnTarget } from '../utils/albumNavigation';
 import { getAppBridge, getRemoteSourcesBridge } from '../utils/echoBridge';
-import { useImeAwareDebouncedSearch } from '../utils/imeInput';
+import { DebouncedSearchInput } from '../components/common/DebouncedSearchInput';
 import { readStoredLibrarySort, writeStoredLibrarySort } from '../utils/librarySortMemory';
 import { readStoredLibrarySourceMode, writeStoredLibrarySourceMode, type LibrarySourceMode } from '../utils/librarySourceMode';
+import { AlbumWallLayoutControl } from './albums/AlbumWallLayoutControl';
+import { readAlbumWallLayoutPreference, writeAlbumWallLayoutPreference, type AlbumWallLayoutPreference } from './albums/albumWallLayoutPreference';
+import { measureMediaWallFixedLayout, mediaWallScrollTopAfterLayoutChange, type MediaWallVirtualLayout } from './albums/albumWallLayout';
 
 const pageSize = 90;
 const albumWallReturnAnimationMs = 0;
@@ -46,52 +50,7 @@ const isPreserveScrollLibraryEvent = (event: Event): boolean =>
 const dispatchPreservedLibraryChange = (): void => {
   window.dispatchEvent(new CustomEvent('library:changed', { detail: { preserveScroll: true } }));
 };
-type AlbumSortOption = { value: LibrarySort; labelKey: TranslationKey };
-const albumSortGroups: Array<{ labelKey: TranslationKey; options: AlbumSortOption[] }> = [
-  {
-    labelKey: 'songs.sort.group.browse',
-    options: [
-      { value: 'default', labelKey: 'library.sort.default' },
-      { value: 'titleAsc', labelKey: 'library.albums.sort.titleAsc' },
-      { value: 'titleDesc', labelKey: 'library.albums.sort.titleDesc' },
-      { value: 'artist', labelKey: 'library.albums.sort.artist' },
-      { value: 'artistDesc', labelKey: 'library.albums.sort.artistDesc' },
-      { value: 'yearDesc', labelKey: 'library.albums.sort.yearDesc' },
-      { value: 'yearAsc', labelKey: 'library.albums.sort.yearAsc' },
-    ],
-  },
-  {
-    labelKey: 'library.albums.sort.group.listening',
-    options: [
-      { value: 'lastPlayed', labelKey: 'library.albums.sort.lastPlayed' },
-      { value: 'playCountDesc', labelKey: 'library.albums.sort.playCountDesc' },
-      { value: 'playCountAsc', labelKey: 'library.albums.sort.playCountAsc' },
-      { value: 'random', labelKey: 'library.sort.random' },
-    ],
-  },
-  {
-    labelKey: 'songs.sort.group.audio',
-    options: [
-      { value: 'durationAsc', labelKey: 'library.sort.durationAsc' },
-      { value: 'durationDesc', labelKey: 'library.sort.durationDesc' },
-    ],
-  },
-  {
-    labelKey: 'library.albums.sort.group.library',
-    options: [
-      { value: 'recent', labelKey: 'library.albums.sort.recentAdded' },
-      { value: 'trackCountDesc', labelKey: 'library.albums.sort.trackCountDesc' },
-      { value: 'trackCountAsc', labelKey: 'library.albums.sort.trackCountAsc' },
-      { value: 'createdDesc', labelKey: 'library.sort.createdDesc' },
-      { value: 'createdAsc', labelKey: 'library.sort.createdAsc' },
-      { value: 'fileModifiedDesc', labelKey: 'library.sort.fileModifiedDesc' },
-      { value: 'fileModifiedAsc', labelKey: 'library.sort.fileModifiedAsc' },
-    ],
-  },
-];
-const albumSortOptions = albumSortGroups.flatMap((group) => group.options);
 const albumsSortStorageKey = 'echo-next.albums.sort';
-const validAlbumSortValues = new Set<LibrarySort>(albumSortOptions.map((option) => option.value));
 
 type AlbumMenuState = {
   album: LibraryAlbum;
@@ -140,12 +99,13 @@ export const AlbumsPage = (): JSX.Element => {
   const { appendTracksToQueue, playTrack, playTrackNext } = usePlaybackQueue();
   const [albums, setAlbums] = useState<LibraryAlbum[]>([]);
   const [total, setTotal] = useState(0);
-  const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
+  const [filterSession] = useState(readAlbumFilterSession);
+  const [search, setSearch] = useState(filterSession?.searchInput ?? '');
+  const [selectedFolderId, setSelectedFolderId] = useState(filterSession?.selectedFolderId ?? '');
   const [sort, setSort] = useState<LibrarySort>(() => readStoredLibrarySort(albumsSortStorageKey, validAlbumSortValues));
-  const [sourceMode, setSourceModeState] = useState<LibrarySourceMode>(() => readStoredLibrarySourceMode());
-  const [remoteSourceId, setRemoteSourceId] = useState<string | null>(null);
+  const [sourceMode, setSourceModeState] = useState<LibrarySourceMode>(() => filterSession?.sourceMode ?? readStoredLibrarySourceMode());
+  const [remoteSourceId, setRemoteSourceId] = useState<string | null>(filterSession?.remoteSourceId ?? null);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
-  const [isSortOpen, setIsSortOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [initialAlbumDetailRequest] = useState(() => peekPendingAlbumDetailNavigation());
@@ -163,11 +123,17 @@ export const AlbumsPage = (): JSX.Element => {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [albumWallVirtualizationEnabled, setAlbumWallVirtualizationEnabled] = useState(false);
   const [albumWallViewportWidth, setAlbumWallViewportWidth] = useState(0);
+  const [albumWallViewportHeight, setAlbumWallViewportHeight] = useState(0);
+  const [wallLayout, setWallLayout] = useState(readAlbumWallLayoutPreference);
+  const previousWallLayoutRef = useRef<MediaWallVirtualLayout | null>(null);
+  const changeWallLayout = useCallback((value: AlbumWallLayoutPreference): void => {
+    setWallLayout(value);
+    writeAlbumWallLayoutPreference(value);
+  }, []);
   const [failedCoverUrls, setFailedCoverUrls] = useState<Record<string, string>>({});
   const [coverRetryKeys, setCoverRetryKeys] = useState<Record<string, number>>({});
   const pageRootRef = useRef<HTMLDivElement | null>(null);
   const pageScrollTopRef = useRef(0);
-  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const shouldRestorePageScrollRef = useRef(false);
   const requestIdRef = useRef(0);
   const isLoadingRef = useRef(false);
@@ -179,20 +145,7 @@ export const AlbumsPage = (): JSX.Element => {
   const albumWallVirtualLoadRequestedRef = useRef(false);
   const pauseDeferredAlbumImages = useScrollImagePause(pageRootRef);
 
-  useEffect(() => {
-    if (!isSortOpen) {
-      return undefined;
-    }
 
-    const handlePointerDown = (event: PointerEvent): void => {
-      if (!sortMenuRef.current?.contains(event.target as Node)) {
-        setIsSortOpen(false);
-      }
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [isSortOpen]);
 
   const loadAlbums = useCallback(
     async (
@@ -228,6 +181,7 @@ export const AlbumsPage = (): JSX.Element => {
           search,
           sort,
           sourceProvider: sourceMode,
+          ...(sourceMode === 'local' && selectedFolderId ? { folderIds: [selectedFolderId] } : {}),
           ...(sourceMode === 'remote' && remoteSourceId ? { sourceId: remoteSourceId } : {}),
         });
 
@@ -261,7 +215,7 @@ export const AlbumsPage = (): JSX.Element => {
         }
       }
     },
-    [remoteSourceId, search, sort, sourceMode, t],
+    [remoteSourceId, search, selectedFolderId, sort, sourceMode, t],
   );
 
   const setSourceMode = useCallback((mode: LibrarySourceMode): void => {
@@ -271,6 +225,10 @@ export const AlbumsPage = (): JSX.Element => {
     }
     writeStoredLibrarySourceMode(mode);
   }, []);
+
+  useEffect(() => {
+    writeAlbumFilterSession({ sourceMode, remoteSourceId, selectedFolderId, searchInput: search });
+  }, [sourceMode, remoteSourceId, selectedFolderId, search]);
 
   const refreshRemoteSources = useCallback(async (): Promise<void> => {
     const remoteApi = getRemoteSourcesBridge();
@@ -335,8 +293,7 @@ export const AlbumsPage = (): JSX.Element => {
     return () => window.removeEventListener('settings:changed', handleSettingsChanged);
   }, []);
 
-  useEffect(() => {
-    const handleLibraryChanged = (event: Event): void => {
+  useLibraryPageRefresh((event) => {
       const scrollTop = readAlbumWallScrollTop(pageRootRef.current);
       if (isPreserveScrollLibraryEvent(event) && scrollTop > preserveScrollThresholdPx) {
         void loadAlbums(1, 'replace', {
@@ -348,11 +305,7 @@ export const AlbumsPage = (): JSX.Element => {
 
       writeAlbumWallScrollTop(pageRootRef.current, 0);
       void loadAlbums(1, 'replace');
-    };
-
-    window.addEventListener('library:changed', handleLibraryChanged);
-    return () => window.removeEventListener('library:changed', handleLibraryChanged);
-  }, [albums.length, loadAlbums, page]);
+  });
 
   useEffect(() => {
     if (albums.length === 0) {
@@ -381,7 +334,7 @@ export const AlbumsPage = (): JSX.Element => {
 
   useLayoutEffect(() => {
     writeAlbumWallScrollTop(pageRootRef.current, 0);
-  }, [search, sort, sourceMode]);
+  }, [search, selectedFolderId, sort, sourceMode]);
 
   useLayoutEffect(() => {
     if (selectedAlbum || !shouldRestorePageScrollRef.current) {
@@ -891,26 +844,18 @@ export const AlbumsPage = (): JSX.Element => {
     });
   }, []);
 
-  const albumWallColumnCount = useMemo(() => {
-    const availableWidth = Math.max(0, albumWallViewportWidth - albumWallPaddingRightPx);
-
-    if (availableWidth <= 0) {
-      return 1;
-    }
-
-    return Math.max(1, Math.floor((availableWidth + albumWallGridGapPx) / (albumWallMinCardWidthPx + albumWallGridGapPx)));
-  }, [albumWallViewportWidth]);
-
-  const albumWallEstimatedCardWidth = useMemo(() => {
-    const availableWidth = Math.max(
-      albumWallMinCardWidthPx,
-      albumWallViewportWidth - albumWallPaddingRightPx - albumWallGridGapPx * (albumWallColumnCount - 1),
-    );
-
-    return Math.max(albumWallMinCardWidthPx, availableWidth / albumWallColumnCount);
-  }, [albumWallColumnCount, albumWallViewportWidth]);
+  const measuredWallLayout = useMemo(() => measureMediaWallFixedLayout(albumWallViewportWidth, {
+    minColumnWidth: albumWallMinCardWidthPx,
+    columnGap: albumWallGridGapPx,
+    paddingRight: albumWallPaddingRightPx,
+    minRowHeight: albumWallVirtualMinRowHeightPx,
+    copyHeight: albumWallVirtualCopyHeightPx,
+    columnCount: wallLayout.columns ?? undefined,
+    visibleRowCount: wallLayout.rows ?? undefined,
+  }, albumWallViewportHeight), [albumWallViewportWidth, albumWallViewportHeight, wallLayout]);
+  const albumWallColumnCount = measuredWallLayout?.columnCount ?? 1;
   const albumWallVirtualLayoutReady = albumWallVirtualizationEnabled && albumWallViewportWidth > 0;
-  const albumWallEstimatedRowHeight = Math.ceil(Math.max(albumWallVirtualMinRowHeightPx, albumWallEstimatedCardWidth + albumWallVirtualCopyHeightPx));
+  const albumWallEstimatedRowHeight = measuredWallLayout?.rowHeight ?? albumWallVirtualMinRowHeightPx;
   const albumWallVirtualRowCount = albumWallVirtualLayoutReady ? Math.ceil(albums.length / albumWallColumnCount) : 0;
   const albumWallVirtualizer = useVirtualizer({
     count: albumWallVirtualRowCount,
@@ -935,13 +880,10 @@ export const AlbumsPage = (): JSX.Element => {
     height: albumWallVirtualTotalSize,
     '--album-wall-columns': albumWallColumnCount,
     '--album-wall-row-height': `${albumWallEstimatedRowHeight}px`,
+    '--album-wall-cover-size': measuredWallLayout?.coverSize === undefined ? undefined : `${measuredWallLayout.coverSize}px`,
   } as CSSProperties;
 
   useLayoutEffect(() => {
-    if (!albumWallVirtualizationEnabled) {
-      return undefined;
-    }
-
     const element = pageRootRef.current;
 
     if (!element) {
@@ -951,6 +893,8 @@ export const AlbumsPage = (): JSX.Element => {
     const updateWidth = (): void => {
       const nextWidth = Math.max(0, Math.floor(element.clientWidth));
       setAlbumWallViewportWidth((current) => (current === nextWidth ? current : nextWidth));
+      const nextHeight = Math.max(0, Math.floor(element.clientHeight));
+      setAlbumWallViewportHeight((current) => current === nextHeight ? current : nextHeight);
     };
 
     updateWidth();
@@ -963,7 +907,18 @@ export const AlbumsPage = (): JSX.Element => {
 
     window.addEventListener('resize', updateWidth);
     return () => window.removeEventListener('resize', updateWidth);
-  }, [albumWallVirtualizationEnabled]);
+  }, [albumWallVirtualizationEnabled, selectedAlbum?.id]);
+
+  useLayoutEffect(() => {
+    if (!measuredWallLayout) return;
+    const previous = previousWallLayoutRef.current;
+    previousWallLayoutRef.current = measuredWallLayout;
+    if (previous && (previous.columnCount !== measuredWallLayout.columnCount || previous.rowHeight !== measuredWallLayout.rowHeight)) {
+      const nextTop = mediaWallScrollTopAfterLayoutChange(readAlbumWallScrollTop(pageRootRef.current), previous, measuredWallLayout);
+      albumWallVirtualizer.measure();
+      writeAlbumWallScrollTop(pageRootRef.current, nextTop);
+    }
+  }, [measuredWallLayout, albumWallVirtualizer]);
 
   useLayoutEffect(() => {
     if (!albumWallVirtualizationEnabled) {
@@ -1102,54 +1057,20 @@ export const AlbumsPage = (): JSX.Element => {
       <div className="songs-control-row">
         <label className="search-box">
           <Search size={18} aria-hidden="true" />
-          <input
+          <DebouncedSearchInput
             type="search"
             placeholder={t('library.albums.searchPlaceholder')}
-            {...searchInputProps}
+            initialValue={search}
+            onSearchChange={setSearch}
           />
         </label>
 
-        <LibrarySourceSwitch value={sourceMode} onChange={setSourceMode} />
-        {sourceMode === 'remote' ? <RemoteSourceFilter sources={remoteSources} value={remoteSourceId} onChange={setRemoteSourceId} /> : null}
-
-        <div className="sort-select" ref={sortMenuRef}>
-          <button
-            className="sort-button"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={isSortOpen}
-            onClick={() => setIsSortOpen((current) => !current)}
-          >
-            <ListFilter className="sort-button-icon" size={16} aria-hidden="true" />
-            <span className="sort-button-label">{t(albumSortOptions.find((option) => option.value === sort)?.labelKey ?? 'library.sort.default')}</span>
-            <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
-          </button>
-          {isSortOpen ? (
-            <div className="sort-menu" role="listbox" aria-label={t('library.albums.sort.aria')} data-state="open">
-              {albumSortGroups.map((group, groupIndex) => (
-                <Fragment key={group.labelKey}>
-                  {groupIndex > 0 ? <div className="sort-menu-divider" role="presentation" /> : null}
-                  <div className="sort-menu-section-title" role="presentation">{t(group.labelKey)}</div>
-                  {group.options.map((option) => (
-                    <button
-                      key={option.value}
-                      className="sort-option"
-                      type="button"
-                      role="option"
-                      aria-selected={sort === option.value}
-                      onClick={() => {
-                        setSort(option.value);
-                        setIsSortOpen(false);
-                      }}
-                    >
-                      <span>{t(option.labelKey)}</span>
-                      {sort === option.value ? <Check size={14} /> : null}
-                    </button>
-                  ))}
-                </Fragment>
-              ))}
-            </div>
-          ) : null}
+        <div className="album-control-actions songs-control-actions">
+        <AlbumWallLayoutControl value={wallLayout} onChange={changeWallLayout} />
+        <LibraryWallFilterControl sourceMode={sourceMode} remoteSources={remoteSources} remoteSourceId={remoteSourceId}
+          selectedFolderId={selectedFolderId} onSourceModeChange={setSourceMode}
+          onRemoteSourceChange={setRemoteSourceId} onFolderChange={setSelectedFolderId} />
+        <AlbumsSortControl sort={sort} onChange={setSort} />
         </div>
       </div>
 
@@ -1159,6 +1080,7 @@ export const AlbumsPage = (): JSX.Element => {
             className="album-wall album-wall--virtualized"
             aria-label={t('library.albums.listAria')}
             data-virtualized="true"
+            data-custom-layout={wallLayout.columns !== null || wallLayout.rows !== null}
             data-estimated-row-height={String(albumWallEstimatedRowHeight)}
             data-column-count={albumWallColumnCount}
             style={albumWallVirtualSectionStyle}
@@ -1182,7 +1104,8 @@ export const AlbumsPage = (): JSX.Element => {
             })}
           </section>
         ) : (
-          <section className="album-wall" aria-label={t('library.albums.listAria')}>
+          <section className="album-wall" aria-label={t('library.albums.listAria')} data-custom-layout={wallLayout.columns !== null || wallLayout.rows !== null}
+            style={{ ...albumWallVirtualSectionStyle, height: undefined }}>
             {albums.map((album, index) => renderAlbumCard(album, index))}
           </section>
         )}

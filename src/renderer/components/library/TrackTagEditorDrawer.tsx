@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CloudDownload, Disc3, FileAudio, FileText, ImagePlus, ListChecks, RefreshCw, Save, Search, Tag, X } from 'lucide-react';
 import type { EditableTrackTags, LibraryTrack, NetworkTagCandidate, TrackCoverSelection } from '../../../shared/types/library';
 import type { LyricsEmbedToTrackResult, LyricsProviderId, LyricsSearchCandidate, TrackLyrics } from '../../../shared/types/lyrics';
+import { TrackLyricsEditorPanel } from './TrackLyricsEditorPanel';
+import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import type {
   PluginCoverLookupResult,
   PluginLogEntry,
@@ -401,11 +403,19 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
   const [lyricsProviderFilter, setLyricsProviderFilter] = useState<LyricsProviderFilter>('all');
   const [lyricsCandidates, setLyricsCandidates] = useState<LyricsSearchCandidate[]>([]);
   const [currentLyrics, setCurrentLyrics] = useState<TrackLyrics | null>(null);
+  const lyricsActionText = useOptionalI18n()?.t ?? translateFallback;
+  const [lyricsDraftDirty, setLyricsDraftDirty] = useState(false);
+  const [isSavingLyrics, setIsSavingLyrics] = useState(false);
   const [lyricsMessage, setLyricsMessage] = useState<string | null>(null);
   const [isSearchingLyrics, setIsSearchingLyrics] = useState(false);
   const [applyingLyricsCandidateId, setApplyingLyricsCandidateId] = useState<string | null>(null);
   const [embeddingLyricsCandidateId, setEmbeddingLyricsCandidateId] = useState<string | null>(null);
   const lyricsSearchRequestIdRef = useRef(0);
+  const currentLyricsReadRef = useRef(0);
+  const applyEditedLyrics = useCallback((lyrics: TrackLyrics): void => {
+    currentLyricsReadRef.current += 1;
+    setCurrentLyrics(lyrics);
+  }, []);
   const pluginLyricsContentRef = useRef(new Map<string, { text: string; fileName: string }>());
 
   const fileName = useMemo(() => track?.path.split(/[\\/]/).pop() ?? '', [track?.path]);
@@ -416,7 +426,8 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
   const initialForm = useMemo(() => stateFromTrack(track), [track]);
   const validationErrors = useMemo(() => getValidationErrors(form), [form]);
   const isBusy = isSaving || isLoadingEmbedded || isSearchingNetwork || isSearchingPluginMetadata;
-  const isLyricsBusy = isSearchingLyrics || Boolean(applyingLyricsCandidateId) || Boolean(embeddingLyricsCandidateId);
+  const isLyricsOperationBusy = isSearchingLyrics || Boolean(applyingLyricsCandidateId) || Boolean(embeddingLyricsCandidateId);
+  const isLyricsBusy = isLyricsOperationBusy || isSavingLyrics || lyricsDraftDirty;
   const isDirty = useMemo(
     () =>
       Boolean(
@@ -442,6 +453,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
   const canEmbedLyrics = track ? canEmbedLyricsIntoTrack(track) : false;
 
   useEffect(() => {
+    const request = ++currentLyricsReadRef.current;
     if (track) {
       setActiveTab('tags');
       setForm(stateFromTrack(track));
@@ -470,9 +482,12 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
       const lyricsApi = window.echo?.lyrics;
       if (lyricsApi?.getForTrack) {
-        void lyricsApi.getForTrack(track.id).then(setCurrentLyrics).catch(() => undefined);
+        void lyricsApi.getForTrack(track.id).then((lyrics) => {
+          if (currentLyricsReadRef.current === request) setCurrentLyrics(lyrics);
+        }).catch(() => undefined);
       }
     }
+    return () => { currentLyricsReadRef.current += 1; };
   }, [track]);
 
   useEffect(() => {
@@ -510,10 +525,10 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
   }, [activeTab, isOpen, selectedPluginMetadataProviderKey]);
 
   const requestClose = (): void => {
-    if (isSaving) {
+    if (isSaving || isSavingLyrics) {
       return;
     }
-    if (isDirty) {
+    if (isDirty || lyricsDraftDirty) {
       setShowDiscardConfirm(true);
       return;
     }
@@ -546,6 +561,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
   const handleSubmit = (event: FormEvent): void => {
     event.preventDefault();
+    if (isSaving || isSavingLyrics || lyricsDraftDirty) return;
     setLocalError(null);
     if (hasValidationErrors(validationErrors)) {
       setLocalError('请先修正标红字段，再保存标签。');
@@ -940,7 +956,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
       const lyrics = pluginLyricsContent
         ? await lyricsApi.applyCustomLrc!(track.id, pluginLyricsContent.text, pluginLyricsContent.fileName)
         : await lyricsApi.applyCandidate(track.id, candidate.id);
-      setCurrentLyrics(lyrics);
+      applyEditedLyrics(lyrics);
       setLyricsMessage('已应用到歌词库，不会写入源音频文件。');
       window.dispatchEvent(new CustomEvent('lyrics:candidate-applied', { detail: { trackId: track.id, lyrics } }));
     } catch (applyError) {
@@ -1319,8 +1335,7 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
                 </section>
               ) : null}
 
-              {activeTab === 'lyrics' ? (
-                <section className="tag-editor-section tag-editor-lyrics-panel tag-editor-tab-panel" aria-label="歌词搜索与嵌入" role="tabpanel">
+                <section className="tag-editor-section tag-editor-lyrics-panel tag-editor-tab-panel" aria-label="歌词搜索与嵌入" role="tabpanel" hidden={activeTab !== 'lyrics'}>
                   <div className="tag-editor-section-heading">
                     <h3>歌词</h3>
                     <button type="button" onClick={() => void handleSearchLyrics()} disabled={isLyricsBusy}>
@@ -1339,6 +1354,9 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
                       嵌入当前歌词
                     </button>
                   </div>
+
+                  <TrackLyricsEditorPanel key={track.id} trackId={track.id} lyrics={currentLyrics} active={activeTab === 'lyrics'} isOpen={isOpen}
+                    disabled={isBusy || isLyricsOperationBusy} onChanged={applyEditedLyrics} onDirtyChange={setLyricsDraftDirty} onBusyChange={setIsSavingLyrics} />
 
                   <div className="tag-editor-lyrics-search">
                     <label>
@@ -1417,7 +1435,6 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
                     </div>
                   ) : null}
                 </section>
-              ) : null}
 
               {activeTab === 'file' ? (
                 <section className="tag-editor-section tag-editor-file-panel tag-editor-tab-panel" aria-label="文件信息" role="tabpanel">
@@ -1475,10 +1492,11 @@ export const TrackTagEditorDrawer = ({ track, isOpen, isSaving, error, onClose, 
 
         <footer className="tag-editor-actions">
           <span>保存会写入源音频文件；播放中会排队延后。</span>
-          <button className="tag-editor-cancel" type="button" onClick={requestClose} disabled={isSaving}>
+          <button className="tag-editor-cancel" type="button" onClick={requestClose} disabled={isSaving || isSavingLyrics}>
             取消
           </button>
-          <button className="tag-editor-save" type="submit" disabled={isSaving || hasValidationErrors(validationErrors)}>
+          <button className="tag-editor-save" type="submit" disabled={isSaving || isSavingLyrics || lyricsDraftDirty || hasValidationErrors(validationErrors)}
+            title={lyricsDraftDirty ? lyricsActionText('communityLibrary.lyrics.finishEditing') : undefined}>
             <Save size={18} />
             {isSaving ? '保存中' : '保存标签'}
           </button>

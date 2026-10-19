@@ -57,6 +57,7 @@ const cueTrack = (trackNumber: number, startSeconds: number, endSeconds: number 
   performer: null,
   album: album.title,
   albumArtist: album.albumArtist,
+  pregapStartSeconds: null,
   startSeconds,
   endSeconds,
 });

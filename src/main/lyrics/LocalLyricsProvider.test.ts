@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -45,6 +45,24 @@ const request = (lyricsQuery: LyricsQuery) => ({
 });
 
 describe('LocalLyricsProvider', () => {
+  it('reads subtitle sidecars with existing language attachments without writing media', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(filePath, 'unchanged audio');
+    writeFileSync(join(root, 'Echo Song.srt'), '1\n00:00:01,000 --> 00:00:02,000\nOriginal');
+    writeFileSync(join(root, 'Echo Song.zh.lrc'), '[00:01.00]翻译');
+    const lyrics = new LocalLyricsProvider().getLyrics(query(filePath));
+    expect(lyrics?.lines[0]).toMatchObject({ timeMs: 1000, text: 'Original', translation: '翻译' });
+    expect(readFileSync(filePath, 'utf8')).toBe('unchanged audio');
+  });
+
+  it('skips a damaged timed sidecar and continues to the next supported file', () => {
+    const root = makeTempRoot();
+    const filePath = join(root, 'Echo Song.flac');
+    writeFileSync(join(root, 'Echo Song.ttml'), '<tt><broken>');
+    writeFileSync(join(root, 'Echo Song.vtt'), 'WEBVTT\n\n00:01.000 --> 00:02.000\nValid');
+    expect(new LocalLyricsProvider().getLyrics(query(filePath))?.lines[0].text).toBe('Valid');
+  });
   it('prefers embedded synced lyrics over sidecar lyrics', async () => {
     const root = makeTempRoot();
     const filePath = join(root, 'Echo Song.flac');

@@ -27,7 +27,7 @@ const runRequest = async (request: LibraryScanWorkerRequest): Promise<LibrarySca
       return {
         requestId: request.requestId,
         ok: true,
-        result: await metadataReader.read(request.filePath),
+        result: await metadataReader.read(request.filePath, request.options),
       };
     }
 

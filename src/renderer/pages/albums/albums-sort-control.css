@@ -1,0 +1,109 @@
+.albums-sort-control {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+}
+
+.album-control-actions {
+  gap: 8px;
+}
+
+.album-control-actions .sort-button {
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 220px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-color: transparent;
+  border-radius: 8px;
+  color: var(--theme-page-text);
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.album-control-actions .sort-button-label {
+  text-decoration: none;
+}
+
+.album-control-actions .sort-button-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--theme-muted-text);
+}
+
+.album-control-actions .sort-button:hover,
+.album-control-actions .sort-button[aria-expanded='true'] {
+  border-color: transparent;
+  color: var(--theme-heading-text);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.album-control-actions .sort-button:hover .sort-button-icon,
+.album-control-actions .sort-button[aria-expanded='true'] .sort-button-icon,
+.album-control-actions .sort-button-icon--active {
+  color: var(--theme-accent-text);
+}
+
+.album-control-actions .sort-button-filter-count {
+  border: 0;
+  background: var(--theme-chip-bg);
+}
+
+.albums-sort-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 8px;
+}
+
+.albums-sort-row > .sort-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.albums-sort-control .albums-sort-row[data-selected='true'] {
+  background: var(--theme-list-row-bg-active);
+}
+
+.album-control-actions .albums-sort-row > .sort-option[aria-selected='true'],
+.album-control-actions .albums-sort-row > .sort-option[aria-selected='true']:hover {
+  background: transparent;
+}
+
+.albums-sort-row .sort-direction-buttons {
+  gap: 0;
+  padding-inline-end: 4px;
+}
+
+.albums-sort-control .sort-direction-buttons button {
+  width: 30px;
+  height: 30px;
+  transition: color 160ms ease;
+}
+
+.albums-sort-control .sort-direction-buttons button[aria-pressed='true'],
+.albums-sort-control .sort-direction-buttons button:not(:disabled):hover {
+  color: var(--theme-accent-text);
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .album-control-actions .sort-button,
+  .albums-sort-control .sort-direction-buttons button {
+    transition: none;
+  }
+}
+
+.albums-page > .songs-control-row { grid-template-columns: minmax(260px, 1fr) auto; }
+@media (max-width: 760px) {
+  .albums-page > .songs-control-row { grid-template-columns: minmax(0, 1fr); }
+  .album-control-actions { flex-wrap: wrap; max-width: 100%; }
+}

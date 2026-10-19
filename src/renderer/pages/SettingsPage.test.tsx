@@ -1338,6 +1338,35 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.general.settingsOptionalSections.title')).toBeTruthy();
   });
 
+  it('routes hidden EQ, plugin and remote searches to the visibility switch without enabling it', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue(settings);
+    render(<SettingsPage />);
+    await screen.findByText('route.settings.label');
+
+    for (const query of ['EQ', '插件', 'WebDAV']) {
+      const input = screen.getByPlaceholderText('settings.header.searchPlaceholder');
+      fireEvent.change(input, { target: { value: query } });
+      fireEvent.click(await screen.findByRole('option', { name: /settings\.general\.settingsOptionalSections\.title/ }));
+      expect(document.getElementById('settings-row-settings-optional-sections')?.dataset.searchHighlight).toBe('true');
+    }
+    expect(setSettingsMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('扫描与资源策略')).toBeNull();
+  });
+
+  it('explains disabled snapshots and links to the protection switch without changing it', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getSettingsMock.mockResolvedValue({ ...settings, dataProtectionDisabled: true });
+    render(<SettingsPage />);
+    await screen.findByText('route.settings.label');
+    clickSettingsNav('settings\\.nav\\.danger\\.label');
+    expect(await screen.findByText(/数据保护已关闭/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'settings.danger.database.action.create' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '前往数据保护设置' }));
+    expect(document.getElementById('settings-row-data-protection-disabled')?.dataset.searchHighlight).toBe('true');
+    expect(setSettingsMock).not.toHaveBeenCalled();
+  });
+
   it('shows optional Plugins, Remote, and EQ settings nav items when enabled', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue({
@@ -1368,7 +1397,7 @@ describe('SettingsPage', () => {
 
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.advancedCustom.label')[0]);
-    fireEvent.click(within(screen.getByText('settings.general.settingsOptionalSections.title').closest('.setting-row') as HTMLElement).getByRole('button'));
+    fireEvent.click(within(screen.getByText('settings.general.settingsOptionalSections.title').closest('.setting-row') as HTMLElement).getByRole('button', { pressed: false }));
 
     await waitFor(() => expect(setSettingsMock).toHaveBeenCalledWith({ settingsOptionalSectionsVisible: true }));
   });
@@ -1956,7 +1985,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('settings.integrations.onlineAlbum.message.saved')).toBeTruthy();
   });
 
-  it('does not show music service login cards in accounts settings', async () => {
+  it('restores music service login cards in accounts settings', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -1967,9 +1996,12 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     clickSettingsNav('settings\\.nav\\.accounts\\.label');
 
-    expect(screen.queryByRole('navigation', { name: 'settings.integrations.accountPanel.title' })).toBeNull();
-    expect(screen.getByRole('article', { name: 'Bilibili' })).toBeTruthy();
-    expect(screen.queryByRole('article', { name: 'Spotify' })).toBeNull();
+    const navigation = screen.getByRole('navigation', { name: 'settings.integrations.accountPanel.title' });
+    for (const label of ['网易云音乐', 'QQ 音乐', '酷狗音乐', 'Bilibili', 'SoundCloud', 'YouTube', 'Spotify', 'TIDAL', 'Qobuz']) {
+      fireEvent.click(within(navigation).getByRole('button', { name: new RegExp(label) }));
+      expect(screen.getByRole('article', { name: label })).toBeTruthy();
+    }
+    expect(within(navigation).queryByRole('button', { name: /osu!/ })).toBeNull();
   });
 
   it('keeps developer API settings collapsed by default and remembers expansion', async () => {
@@ -1991,7 +2023,8 @@ describe('SettingsPage', () => {
 
     expect(window.localStorage.getItem('echo:settings:integrations:credential-panel-expanded')).toBe('true');
     expect(screen.getByText('settings.integrations.onlineAlbum.title')).toBeTruthy();
-    expect(screen.queryByText('settings.integrations.spotifyAuth.title')).toBeNull();
+    expect(screen.getByText('settings.integrations.spotifyAuth.title')).toBeTruthy();
+    expect(screen.getByText('settings.integrations.tidalAuth.title')).toBeTruthy();
     expect(screen.getByText('settings.integrations.lastfm.title')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.integrations.credentialPanel.collapse' }));
@@ -4042,7 +4075,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(within(row).getByRole('button').getAttribute('aria-pressed')).toBe('true'));
   });
 
-  it('does not expose music account login when the Accounts section opens', async () => {
+  it('opens NetEase login with QR and browser options when Accounts opens', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     getSettingsMock.mockResolvedValue(settings);
     resetSettingsMock.mockResolvedValue(settings);
@@ -4053,8 +4086,10 @@ describe('SettingsPage', () => {
     await screen.findByText('route.settings.label');
     fireEvent.click(screen.getAllByText('settings.nav.accounts.label')[0]);
 
-    expect(screen.getByRole('article', { name: 'Bilibili' })).toBeTruthy();
-    expect(screen.queryByText('settings.integrations.accountPanel.title')).toBeNull();
+    const card = screen.getByRole('article', { name: '网易云音乐' });
+    expect(within(card).getByRole('button', { name: 'settings.integrations.accounts.neteaseQr.action' })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'settings.integrations.accounts.neteaseQr.webLogin' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'settings.integrations.accountPanel.title' })).toBeTruthy();
     expect(screen.queryByText('settings.integrations.accountStartupRefresh.title')).toBeNull();
     await waitFor(() => expect(getAccountStatusesMock).toHaveBeenCalled());
   });

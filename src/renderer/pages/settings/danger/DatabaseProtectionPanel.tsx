@@ -1,3 +1,5 @@
+import { useI18n } from '../../../i18n/I18nProvider';
+import { databaseProtectionSettingsCopy } from './databaseProtectionSettingsCopy';
 import {
   FileText,
   FolderOpen,
@@ -45,6 +47,7 @@ type DatabaseProtectionPanelProps = {
   onDiscardQuarantinedTracks: () => void;
   onExportDiagnostics: () => void;
   onOpenFolder: () => void;
+  onOpenDataProtectionSettings: () => void;
   onPrimaryRecovery: () => void;
   onRefresh: () => void;
   onRelaunchRecovery: () => void;
@@ -77,6 +80,7 @@ export const DatabaseProtectionPanel = ({
   onDiscardQuarantinedTracks,
   onExportDiagnostics,
   onOpenFolder,
+  onOpenDataProtectionSettings,
   onPrimaryRecovery,
   onRefresh,
   onRelaunchRecovery,
@@ -92,6 +96,8 @@ export const DatabaseProtectionPanel = ({
   t,
   unrecoverable,
 }: DatabaseProtectionPanelProps): JSX.Element => {
+  const { locale } = useI18n();
+  const protectionCopy = databaseProtectionSettingsCopy[locale];
   const healthStatus = status?.health.status;
   const latestHealthySnapshot = status?.latestHealthySnapshot ?? null;
 
@@ -224,7 +230,15 @@ export const DatabaseProtectionPanel = ({
           onChange={(event) => onConfirmWordChange(event.target.value)}
         />
       </label>
-      {primaryActionUnavailableReason ? (
+      {dataProtectionDisabled ? (
+        <div className="settings-inline-note" role="note">
+          <p>{protectionCopy.disabledReason}</p>
+          <button className="settings-action-button" type="button" onClick={onOpenDataProtectionSettings}>
+            {protectionCopy.openSettings}
+          </button>
+        </div>
+      ) : null}
+      {(!dataProtectionDisabled || latestHealthySnapshot) && primaryActionUnavailableReason ? (
         <p className="settings-inline-note">{primaryActionUnavailableReason}</p>
       ) : null}
       {error ? <p className="settings-inline-error" role="alert">{error}</p> : null}

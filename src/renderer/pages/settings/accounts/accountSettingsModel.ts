@@ -51,14 +51,15 @@ export const accountLoginUrls: Record<AccountProvider, string> = {
 };
 
 export const cookieAccountProviders: AccountProvider[] = [
+  'kugou',
   'netease',
   'qqmusic',
   'bilibili',
   'soundcloud',
-  'osu',
 ];
 
 export const settingsAccountProviders: AccountProvider[] = [
+  'kugou',
   'netease',
   'qqmusic',
   'bilibili',
@@ -67,7 +68,6 @@ export const settingsAccountProviders: AccountProvider[] = [
   'spotify',
   'tidal',
   'qobuz',
-  'osu',
 ];
 
 export const accountProviderLogoUrls: Partial<Record<AccountProvider, string>> = {

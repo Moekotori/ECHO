@@ -577,6 +577,15 @@ export type LibraryFolderChildrenQuery = {
   parentPath?: string;
 };
 
+export type LibraryFolderInsight =
+  | 'recentlyAdded'
+  | 'unplayed'
+  | 'lossless'
+  | 'hiRes'
+  | 'missingCover'
+  | 'missingLyrics'
+  | 'duplicates';
+
 export type LibraryFolderTracksQuery = LibraryPageQuery & {
   folderId: string;
   path?: string;
@@ -801,6 +810,7 @@ export type LibrarySort =
   | 'artistDesc'
   | 'artistAlbum'
   | 'album'
+  | 'albumDesc'
   | 'albumCountDesc'
   | 'recent';
 
@@ -817,6 +827,19 @@ export type LibraryAudioFormatFilter =
   | 'dsd'
   | 'otherSampleRate';
 
+export type LibraryFileFormatFilter =
+  | 'all'
+  | 'flac'
+  | 'mp3'
+  | 'wav'
+  | 'aiff'
+  | 'alac'
+  | 'aac'
+  | 'ogg'
+  | 'opus'
+  | 'dsd'
+  | 'other';
+
 export type ArtistGrouping = 'split' | 'albumArtist';
 
 export type LibraryPageQuery = {
@@ -824,6 +847,12 @@ export type LibraryPageQuery = {
   pageSize?: number;
   search?: string;
   sort?: LibrarySort;
+  sorts?: LibrarySort[];
+  fileFormatFilter?: LibraryFileFormatFilter;
+  folderIds?: string[];
+  folderInsight?: LibraryFolderInsight;
+  filterYear?: number;
+  filterGenre?: string;
   artistGrouping?: ArtistGrouping;
   audioFormatFilter?: LibraryAudioFormatFilter;
   sourceProvider?: PlaylistSourceProvider;

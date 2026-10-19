@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
-import sharp from 'sharp';
+import sharp from '../../images/sharpRuntime';
 import {
   COVER_CACHE_VERSION,
   type CoverCacheRepairOptions,

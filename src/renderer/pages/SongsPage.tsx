@@ -1,7 +1,14 @@
+import { SongsFilterPanel } from './songs/SongsFilterPanel';
+import { SongsSortOptions } from './songs/SongsSortOptions';
+import { sortOptions } from './songs/songSortMenuConfig';
+import { audioFormatFilterOptions, fileFormatFilterLabelKey } from './songs/songsFilterOptions';
+import { toggleSongMultiSort } from '../utils/songSortSelection';
+import { readStoredSongSortPreference, writeStoredSongSortPreference } from '../utils/songSortPreference';
+import '../styles/songs-filter.css';
 import { useTrackViewportPaging, type TrackViewportLoadMode, type TrackViewportRange } from '../hooks/useTrackViewportPaging';
-import { Fragment, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
-import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryAudioFormatFilter, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
+import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryAudioFormatFilter, LibraryFileFormatFilter, LibraryFolder, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import type { StreamingProviderDescriptor, StreamingProviderName, StreamingSearchResult, StreamingTrack } from '../../shared/types/streaming';
 import { TrackContextMenu } from '../components/library/TrackContextMenu';
@@ -36,7 +43,7 @@ import {
   isLibraryDatabaseCorruptionError,
   openLibraryDatabaseRecoverySettings,
 } from '../utils/databaseRecovery';
-import { useImeAwareDebouncedSearch } from '../utils/imeInput';
+import { DebouncedSearchInput } from '../components/common/DebouncedSearchInput';
 import { readStoredLibrarySourceMode, writeStoredLibrarySourceMode, type LibrarySourceMode } from '../utils/librarySourceMode';
 import { getRemoteSourcesBridge, getStreamingBridge } from '../utils/echoBridge';
 import { getMouseSideButtonDirection, shouldIgnoreMouseSideButtonTarget } from '../utils/mouseSideButtons';
@@ -57,70 +64,6 @@ const dispatchLibraryChangedPreservingScroll = (): void => {
 };
 const isRemoteSourceRefreshPlaybackBusy = (state: string | null | undefined): boolean =>
   state === 'loading' || state === 'playing';
-type SongSortOption = { value: LibrarySort; labelKey: TranslationKey };
-const sortGroups: Array<{ labelKey: TranslationKey; options: SongSortOption[] }> = [
-  {
-    labelKey: 'songs.sort.group.browse',
-    options: [
-      { value: 'default', labelKey: 'songs.sort.default' },
-      { value: 'titleAsc', labelKey: 'songs.sort.titleAsc' },
-      { value: 'titleDesc', labelKey: 'songs.sort.titleDesc' },
-      { value: 'artist', labelKey: 'songs.sort.artist' },
-      { value: 'artistAlbum', labelKey: 'songs.sort.artistAlbum' },
-      { value: 'album', labelKey: 'songs.sort.album' },
-      { value: 'yearDesc', labelKey: 'songs.sort.yearDesc' },
-      { value: 'yearAsc', labelKey: 'songs.sort.yearAsc' },
-    ],
-  },
-  {
-    labelKey: 'songs.sort.group.listening',
-    options: [
-      { value: 'lastPlayed', labelKey: 'songs.sort.lastPlayed' },
-      { value: 'playCountDesc', labelKey: 'songs.sort.playCountDesc' },
-      { value: 'playCountAsc', labelKey: 'songs.sort.playCountAsc' },
-      { value: 'bpmAsc', labelKey: 'songs.sort.bpmAsc' },
-      { value: 'bpmDesc', labelKey: 'songs.sort.bpmDesc' },
-      { value: 'random', labelKey: 'songs.sort.random' },
-    ],
-  },
-  {
-    labelKey: 'songs.sort.group.audio',
-    options: [
-      { value: 'audioSpecDesc', labelKey: 'songs.sort.audioSpecDesc' },
-      { value: 'audioSpecAsc', labelKey: 'songs.sort.audioSpecAsc' },
-      { value: 'qualityDesc', labelKey: 'songs.sort.qualityDesc' },
-      { value: 'qualityAsc', labelKey: 'songs.sort.qualityAsc' },
-      { value: 'durationAsc', labelKey: 'songs.sort.durationAsc' },
-      { value: 'durationDesc', labelKey: 'songs.sort.durationDesc' },
-    ],
-  },
-  {
-    labelKey: 'songs.sort.group.library',
-    options: [
-      { value: 'createdDesc', labelKey: 'songs.sort.createdDesc' },
-      { value: 'createdAsc', labelKey: 'songs.sort.createdAsc' },
-      { value: 'recent', labelKey: 'songs.sort.recent' },
-      { value: 'fileModifiedDesc', labelKey: 'songs.sort.fileModifiedDesc' },
-      { value: 'fileModifiedAsc', labelKey: 'songs.sort.fileModifiedAsc' },
-    ],
-  },
-];
-const sortOptions = sortGroups.flatMap((group) => group.options);
-
-const audioFormatFilterOptions: Array<{ value: LibraryAudioFormatFilter; labelKey: TranslationKey }> = [
-  { value: 'all', labelKey: 'songs.filter.audioFormat.all' },
-  { value: 'sampleRate44100', labelKey: 'songs.filter.audioFormat.sampleRate44100' },
-  { value: 'sampleRate48000', labelKey: 'songs.filter.audioFormat.sampleRate48000' },
-  { value: 'sampleRate88200', labelKey: 'songs.filter.audioFormat.sampleRate88200' },
-  { value: 'sampleRate96000', labelKey: 'songs.filter.audioFormat.sampleRate96000' },
-  { value: 'sampleRate176400', labelKey: 'songs.filter.audioFormat.sampleRate176400' },
-  { value: 'sampleRate192000', labelKey: 'songs.filter.audioFormat.sampleRate192000' },
-  { value: 'sampleRate352800', labelKey: 'songs.filter.audioFormat.sampleRate352800' },
-  { value: 'sampleRate384000', labelKey: 'songs.filter.audioFormat.sampleRate384000' },
-  { value: 'dsd', labelKey: 'songs.filter.audioFormat.dsd' },
-  { value: 'otherSampleRate', labelKey: 'songs.filter.audioFormat.otherSampleRate' },
-];
-
 const songsSortStorageKey = 'echo-next.songs.sort';
 const songsHideDuplicatesStorageKey = 'echo-next.songs.hide-duplicates';
 const songsOsuHiFiModeStorageKey = 'echo-next.songs.osu-hifi-mode';
@@ -356,6 +299,8 @@ const summarizeScanJobs = (statuses: LibraryScanStatus[], t: Translate): string 
 
 type InitialSongsState = {
   audioFormatFilter: LibraryAudioFormatFilter;
+  isMultiSortEnabled: boolean;
+  selectedSorts: LibrarySort[];
   hideDuplicates: boolean;
   showDuplicatesOnly: boolean;
   showOsuOnly: boolean;
@@ -365,13 +310,16 @@ type InitialSongsState = {
 };
 
 const readInitialSongsState = (): InitialSongsState => {
-  const sort = readStoredSort();
+  const storedSort = readStoredSort();
+  const preference = readStoredSongSortPreference(storedSort, validSortValues);
+  const sort = preference.isMultiSortEnabled ? preference.selectedSorts[0] ?? storedSort : storedSort;
   const audioFormatFilter: LibraryAudioFormatFilter = 'all';
   const hideDuplicates = readStoredHideDuplicates();
   const sourceMode = readStoredLibrarySourceMode();
   const query = {
     pageSize,
     search: '',
+    sorts: preference.isMultiSortEnabled ? preference.selectedSorts : undefined,
     sort,
     audioFormatFilter,
     sourceProvider: sourceMode,
@@ -383,6 +331,8 @@ const readInitialSongsState = (): InitialSongsState => {
   const queryKey = createSongsFirstPageSnapshotQueryKey(query);
 
   return {
+    isMultiSortEnabled: preference.isMultiSortEnabled,
+    selectedSorts: preference.selectedSorts,
     audioFormatFilter,
     hideDuplicates,
     showDuplicatesOnly: false,
@@ -412,10 +362,26 @@ export const SongsPage = (): JSX.Element => {
   const [loadedStartIndex, setLoadedStartIndex] = useState(0);
   const [total, setTotal] = useState(() => initialSnapshot?.total ?? 0);
   const [hasMore, setHasMore] = useState(() => (initialSnapshot ? initialSnapshot.items.length < initialSnapshot.total : false));
-  const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
+  const [search, setSearch] = useState('');
   const [sort, setSort] = useState<LibrarySort>(() => initialSongsState.sort);
+  const [isMultiSortEnabled, setIsMultiSortEnabled] = useState(initialSongsState.isMultiSortEnabled);
+  const [selectedSorts, setSelectedSorts] = useState<LibrarySort[]>(initialSongsState.selectedSorts);
+  const effectiveSorts = useMemo(() => isMultiSortEnabled ? selectedSorts : [sort], [isMultiSortEnabled, selectedSorts, sort]);
+  const [fileFormatFilter, setFileFormatFilter] = useState<LibraryFileFormatFilter>('all');
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
+  const [filterYear, setFilterYear] = useState<number | null>(null);
+  const [filterGenre, setFilterGenre] = useState('');
+  const [libraryFolders, setLibraryFolders] = useState<LibraryFolder[]>([]);
+  const [libraryFoldersLoaded, setLibraryFoldersLoaded] = useState(false);
   const [audioFormatFilter, setAudioFormatFilter] = useState<LibraryAudioFormatFilter>(() => initialSongsState.audioFormatFilter);
   const [sourceMode, setSourceModeState] = useState<LibrarySourceMode>(() => initialSongsState.sourceMode);
+  const extraQuery = useMemo(() => ({
+    sorts: isMultiSortEnabled ? selectedSorts : undefined,
+    fileFormatFilter: fileFormatFilter === 'all' ? undefined : fileFormatFilter,
+    folderIds: sourceMode === 'local' && selectedFolderIds.length ? selectedFolderIds : undefined,
+    filterYear: filterYear ?? undefined,
+    filterGenre: filterGenre || undefined,
+  }), [fileFormatFilter, filterGenre, filterYear, isMultiSortEnabled, selectedFolderIds, selectedSorts, sourceMode]);
   const [remoteSourceId, setRemoteSourceId] = useState<string | null>(null);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [remoteSourcesLoaded, setRemoteSourcesLoaded] = useState(false);
@@ -475,7 +441,7 @@ export const SongsPage = (): JSX.Element => {
   const remoteSourceRefreshPlaybackBusy = isRemoteSourceRefreshPlaybackBusy(playbackActivityState);
   const visibleTrackIdsKey = useMemo(() => visibleTrackIds.join('\0'), [visibleTrackIds]);
   const loadedTrackIdsKey = useMemo(() => uniqueIds(tracks.map((track) => track.id)).join('\0'), [tracks]);
-  const activeSortLabel = t(sortOptions.find((option) => option.value === sort)?.labelKey ?? 'songs.sort.default');
+  const activeSortLabel = isMultiSortEnabled && effectiveSorts.length > 1 ? t('songs.sort.multiCount', { count: effectiveSorts.length }) : t(sortOptions.find((option) => option.value === sort)?.labelKey ?? 'songs.sort.default');
   const activeAudioFormatFilterLabel = t(audioFormatFilterOptions.find((option) => option.value === audioFormatFilter)?.labelKey ?? 'songs.filter.audioFormat.all');
   const activeFilterLabels = useMemo(() => {
     const labels: string[] = [];
@@ -488,8 +454,12 @@ export const SongsPage = (): JSX.Element => {
     if (audioFormatFilter !== 'all') {
       labels.push(activeAudioFormatFilterLabel);
     }
+    if (fileFormatFilter !== 'all') labels.push(t(fileFormatFilterLabelKey(fileFormatFilter)));
+    if (sourceMode === 'local') labels.push(...selectedFolderIds.map((id) => libraryFolders.find((folder) => folder.id === id)?.name ?? id));
+    if (filterYear != null) labels.push(String(filterYear));
+    if (filterGenre) labels.push(filterGenre);
     return labels;
-  }, [activeAudioFormatFilterLabel, audioFormatFilter, showDuplicatesOnly, showOsuOnly, t]);
+  }, [activeAudioFormatFilterLabel, audioFormatFilter, showDuplicatesOnly, showOsuOnly, fileFormatFilter, filterYear, filterGenre, libraryFolders, selectedFolderIds, sourceMode, t]);
   const activeFilterCount = activeFilterLabels.length;
   const filterButtonLabel = t('songs.filter.button');
   const filterButtonTitle = activeFilterCount > 0 ? `${filterButtonLabel} · ${activeFilterLabels.join(' / ')}` : filterButtonLabel;
@@ -506,13 +476,16 @@ export const SongsPage = (): JSX.Element => {
           ? t('songs.osuOnly')
           : sourceMode === 'remote' ? t('songs.queueSource.remote') : t('songs.queueSource.local'),
       search: search || undefined,
+      ...extraQuery,
+      sourceProvider: sourceMode,
+      sourceId: sourceMode === 'remote' ? remoteSourceId : undefined,
       sort,
       hideDuplicates: effectiveHideDuplicates,
       showDuplicatesOnly,
       showOsuOnly,
       audioFormatFilter: audioFormatFilter === 'all' ? undefined : audioFormatFilter,
     }),
-    [audioFormatFilter, effectiveHideDuplicates, search, showDuplicatesOnly, showOsuOnly, sort, sourceMode, t],
+    [extraQuery, remoteSourceId, audioFormatFilter, effectiveHideDuplicates, search, showDuplicatesOnly, showOsuOnly, sort, sourceMode, t],
   );
   const reportSongsError = useCallback((value: unknown): void => {
     if (isLibraryDatabaseCorruptionError(value)) {
@@ -752,8 +725,10 @@ export const SongsPage = (): JSX.Element => {
         );
 
         if (validSortValues.has(nextSort)) {
-          setSort(nextSort);
-          writeStoredSort(nextSort);
+          if (!initialSongsStateRef.current?.isMultiSortEnabled) {
+            setSort(nextSort);
+            writeStoredSort(nextSort);
+          }
         }
       })
       .catch(() => undefined);
@@ -784,6 +759,7 @@ export const SongsPage = (): JSX.Element => {
     }
 
     const handlePointerDown = (event: MouseEvent): void => {
+      if ((event.target as Element)?.closest?.('[data-songs-filter-floating="true"]')) return;
       if (!filterMenuRef.current?.contains(event.target as Node)) {
         closeFilterMenu();
       }
@@ -798,12 +774,12 @@ export const SongsPage = (): JSX.Element => {
   const handleToggleDuplicateFilter = useCallback((): void => {
     const nextShowDuplicatesOnly = !showDuplicatesOnly;
     setShowDuplicatesOnly(nextShowDuplicatesOnly);
-    closeFilterMenu();
     setSelectedTrackIds({});
     clearSongsFirstPageSnapshot();
     clearListMetadataCache();
 
     if (nextShowDuplicatesOnly) {
+      setShowOsuOnly(false);
       if (sourceMode !== 'local') {
         setSourceModeState('local');
         setRemoteSourceId(null);
@@ -817,7 +793,6 @@ export const SongsPage = (): JSX.Element => {
   const handleToggleOsuFilter = useCallback((): void => {
     const nextShowOsuOnly = !showOsuOnly;
     setShowOsuOnly(nextShowOsuOnly);
-    closeFilterMenu();
     setSelectedTrackIds({});
     clearSongsFirstPageSnapshot();
     clearListMetadataCache();
@@ -835,13 +810,37 @@ export const SongsPage = (): JSX.Element => {
   const handleAudioFormatFilterChange = useCallback(
     (nextAudioFormatFilter: LibraryAudioFormatFilter): void => {
       setAudioFormatFilter(nextAudioFormatFilter);
-      closeFilterMenu();
       setSelectedTrackIds({});
       clearSongsFirstPageSnapshot();
       clearListMetadataCache();
     },
     [clearListMetadataCache, closeFilterMenu],
   );
+
+  const applySongFilterSideEffects = useCallback((): void => {
+    setSelectedTrackIds({});
+    clearSongsFirstPageSnapshot();
+    clearListMetadataCache();
+  }, [clearListMetadataCache]);
+
+  useEffect(() => {
+    writeStoredSongSortPreference({ isMultiSortEnabled, selectedSorts });
+  }, [isMultiSortEnabled, selectedSorts]);
+
+  useEffect(() => {
+    if (!isFilterOpen || sourceMode !== 'local' || libraryFoldersLoaded) return;
+    let cancelled = false;
+    void window.echo?.library?.getFolders().then((folders) => {
+      if (!cancelled) { setLibraryFolders(folders.filter((folder) => folder.status === 'active')); setLibraryFoldersLoaded(true); }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isFilterOpen, libraryFoldersLoaded, sourceMode]);
+
+  useEffect(() => {
+    const invalidateFolders = (): void => setLibraryFoldersLoaded(false);
+    window.addEventListener('library:changed', invalidateFolders);
+    return () => window.removeEventListener('library:changed', invalidateFolders);
+  }, []);
 
   const loadTracks = useCallback(
     async (
@@ -885,6 +884,7 @@ export const SongsPage = (): JSX.Element => {
           page: nextPage,
           pageSize: options.pageSizeOverride ?? pageSize,
           search,
+          ...extraQuery,
           sort,
           audioFormatFilter,
           sourceProvider: sourceMode,
@@ -898,6 +898,7 @@ export const SongsPage = (): JSX.Element => {
         const shouldUseFirstPageSnapshot = mode === 'replace' && nextPage === 1 && canUseSongsFirstPageSnapshot(query);
         const queryStartedAt = performance.now();
         const result = await library.getTracks(query);
+        if (requestIdRef.current !== requestId) return;
         if (options.additionalPages && result.hasMore) {
           const following = await Promise.all(Array.from({ length: options.additionalPages }, (_, index) =>
             library.getTracks({ ...query, page: nextPage + index + 1 })));
@@ -968,7 +969,7 @@ export const SongsPage = (): JSX.Element => {
         }
       }
     },
-    [audioFormatFilter, clearListMetadataCache, effectiveHideDuplicates, remoteSourceId, reportSongsError, search, showDuplicatesOnly, showOsuOnly, sort, sourceMode, t],
+    [extraQuery, audioFormatFilter, clearListMetadataCache, effectiveHideDuplicates, remoteSourceId, reportSongsError, search, showDuplicatesOnly, showOsuOnly, sort, sourceMode, t],
   );
 
   useEffect(() => {
@@ -1083,7 +1084,7 @@ export const SongsPage = (): JSX.Element => {
     await (mode === 'window' ? loadTracks(page, 'replace', { preserveListInstance: true }) : loadTracks(page, mode));
     return requestIdRef.current === requestId;
   }, [loadTracks]);
-  const viewportQueryKey = JSON.stringify([listVersion, search, sort, sourceMode, remoteSourceId, audioFormatFilter,
+  const viewportQueryKey = JSON.stringify([listVersion, search, sort, extraQuery, sourceMode, remoteSourceId, audioFormatFilter,
     effectiveHideDuplicates, showDuplicatesOnly, showOsuOnly]);
   const loadedCurrentTrackIndex = tracks.findIndex((track) => track.id === currentTrackId);
   if (currentTrackId && loadedCurrentTrackIndex >= 0) {
@@ -2043,10 +2044,11 @@ export const SongsPage = (): JSX.Element => {
       <div className="songs-control-row">
         <label className="search-box">
           <Search size={18} aria-hidden="true" />
-          <input
+          <DebouncedSearchInput
             type="search"
             placeholder={t('songs.search.placeholder')}
-            {...searchInputProps}
+            initialValue={search}
+            onSearchChange={setSearch}
           />
         </label>
 
@@ -2076,7 +2078,7 @@ export const SongsPage = (): JSX.Element => {
             <button
               className="sort-button"
               type="button"
-              aria-haspopup="listbox"
+              aria-haspopup="dialog"
               aria-expanded={isFilterOpen}
               aria-label={filterButtonTitle}
               title={filterButtonTitle}
@@ -2088,44 +2090,23 @@ export const SongsPage = (): JSX.Element => {
               <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
             </button>
             {isFilterOpen ? (
-              <div className="sort-menu" role="listbox" aria-label={t('songs.filter.menuAria')} data-state="open">
-                <div className="sort-menu-section-title" role="presentation">{t('songs.filter.section')}</div>
-                <button
-                  className="sort-option sort-option--filter"
-                  type="button"
-                  role="option"
-                  aria-selected={showDuplicatesOnly}
-                  onClick={handleToggleDuplicateFilter}
-                >
-                  <span>{t('songs.duplicatesOnly')}</span>
-                  {showDuplicatesOnly ? <Check size={14} /> : null}
-                </button>
-                <button
-                  className="sort-option sort-option--filter"
-                  type="button"
-                  role="option"
-                  aria-selected={showOsuOnly}
-                  onClick={handleToggleOsuFilter}
-                >
-                  <span>{t('songs.osuOnly')}</span>
-                  {showOsuOnly ? <Check size={14} /> : null}
-                </button>
-                <div className="sort-menu-divider" role="presentation" />
-                <div className="sort-menu-section-title" role="presentation">{t('songs.filter.audioFormat')}</div>
-                {audioFormatFilterOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    className="sort-option sort-option--filter"
-                    type="button"
-                    role="option"
-                    aria-selected={audioFormatFilter === option.value}
-                    onClick={() => handleAudioFormatFilterChange(option.value)}
-                  >
-                    <span>{t(option.labelKey)}</span>
-                    {audioFormatFilter === option.value ? <Check size={14} /> : null}
-                  </button>
-                ))}
-              </div>
+              <SongsFilterPanel
+                dialogRef={undefined} sourceMode={sourceMode} showDuplicatesOnly={showDuplicatesOnly}
+                showOsuOnly={showOsuOnly} onToggleOsu={handleToggleOsuFilter}
+                audioFormatFilter={audioFormatFilter} fileFormatFilter={fileFormatFilter}
+                folders={libraryFolders} foldersLoaded={libraryFoldersLoaded} selectedFolderIds={selectedFolderIds}
+                filterYear={filterYear} filterGenre={filterGenre} activeFilterCount={activeFilterCount}
+                onToggleDuplicates={handleToggleDuplicateFilter} onAudioFormatChange={handleAudioFormatFilterChange}
+                onFileFormatChange={(value) => { setFileFormatFilter(value); applySongFilterSideEffects(); }}
+                onFolderIdsChange={(value) => { setSelectedFolderIds(value); applySongFilterSideEffects(); }}
+                onYearChange={(value) => { setFilterYear(value); applySongFilterSideEffects(); }}
+                onGenreChange={(value) => { setFilterGenre(value); applySongFilterSideEffects(); }}
+                onReset={() => {
+                  setAudioFormatFilter('all'); setFileFormatFilter('all'); setSelectedFolderIds([]);
+                  setFilterYear(null); setFilterGenre(''); setShowDuplicatesOnly(false); setShowOsuOnly(false);
+                  applySongFilterSideEffects();
+                }}
+              />
             ) : null}
           </div>
 
@@ -2133,7 +2114,7 @@ export const SongsPage = (): JSX.Element => {
             <button
               className="sort-button"
               type="button"
-              aria-haspopup="listbox"
+              aria-haspopup="dialog"
               aria-expanded={isSortOpen && !isSortClosing}
               aria-label={activeSortLabel}
               title={activeSortLabel}
@@ -2144,29 +2125,48 @@ export const SongsPage = (): JSX.Element => {
               <ChevronDown className="sort-button-chevron" size={15} aria-hidden="true" />
             </button>
             {isSortOpen ? (
-              <div className="sort-menu" role="listbox" aria-label={t('songs.sort.menuAria')} data-state={isSortClosing ? 'closing' : 'open'}>
-                {sortGroups.map((group, groupIndex) => (
-                  <Fragment key={group.labelKey}>
-                    {groupIndex > 0 ? <div className="sort-menu-divider" role="presentation" /> : null}
-                    <div className="sort-menu-section-title" role="presentation">{t(group.labelKey)}</div>
-                    {group.options.map((option) => (
-                      <button
-                        key={option.value}
-                        className="sort-option"
-                        type="button"
-                        role="option"
-                        aria-selected={sort === option.value}
-                        onClick={() => {
-                          setSort(option.value);
-                          closeSortMenu();
-                        }}
-                      >
-                        <span>{t(option.labelKey)}</span>
-                        {sort === option.value ? <Check size={14} /> : null}
-                      </button>
-                    ))}
-                  </Fragment>
-                ))}
+              <div className="sort-menu sort-menu--songs" role="dialog" aria-label={t('songs.sort.menuAria')} data-state={isSortClosing ? 'closing' : 'open'}>
+                <div className="sort-multi-toggle">
+                  <span className="sort-multi-toggle-copy">
+                    <strong>{t('songs.sort.multi.label')}</strong>
+                    <small>{t('songs.sort.multi.hint')}</small>
+                  </span>
+                  <button
+                    className="sort-multi-switch"
+                    type="button"
+                    role="switch"
+                    aria-checked={isMultiSortEnabled}
+                    aria-label={t('songs.sort.multi.label')}
+                    onClick={() => { setSelectedSorts([sort]); setIsMultiSortEnabled((current) => !current); }}
+                  >
+                    <span aria-hidden="true" />
+                  </button>
+                </div>
+                <div
+                  className="sort-menu-options"
+                  role="listbox"
+                  aria-label={t('songs.sort.menuAria')}
+                  aria-multiselectable={isMultiSortEnabled}
+                >
+                  <SongsSortOptions
+                    effectiveSorts={effectiveSorts}
+                    isMultiSortEnabled={isMultiSortEnabled}
+                    onSelect={(value, directionOnly) => {
+                      if (!isMultiSortEnabled) {
+                        if (directionOnly) {
+                          setSelectedSorts([value]);
+                          setSort(value);
+                        } else {
+                          setSelectedSorts([value]); setSort(value); closeSortMenu();
+                        }
+                        return;
+                      }
+                      const nextSorts = toggleSongMultiSort(selectedSorts, value);
+                      setSelectedSorts(nextSorts);
+                      setSort(nextSorts[0] ?? 'default');
+                    }}
+                  />
+                </div>
               </div>
             ) : null}
           </div>

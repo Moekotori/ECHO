@@ -535,6 +535,21 @@ describe('MiniPlayerApp', () => {
     scrollWidth.mockRestore();
   });
 
+  it('shows the selected queue entry instead of a stopped host previous track', async () => {
+    const selected = makeTrack({ id: 'selected', title: 'Selected queue song', duration: 123 });
+    const previous = makeTrack({ id: 'previous', title: 'Old stopped host song', path: 'D:\\Music\\Old.flac' });
+    installEchoMock(previous, {
+      audioStatus: { ...makeAudioStatus(previous), state: 'stopped', positionSeconds: 42 },
+      playbackStatus: { ...makePlaybackStatus(previous), state: 'stopped' },
+      queueSession: makeQueueSession(selected, [selected, previous]),
+    });
+    render(<MiniPlayerApp />);
+    await screen.findByText('Selected queue song');
+    expect(screen.queryByText('Old stopped host song')).toBeNull();
+    expect(Number((document.querySelector('.mini-player-progress-row input') as HTMLInputElement).value)).toBe(0);
+    expect(screen.getByText('2:03')).toBeTruthy();
+  });
+
   it('prefers live playback status over stale mini player queue metadata', async () => {
     const queuedTrack = makeTrack({
       id: 'stale-track',

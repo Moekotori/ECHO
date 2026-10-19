@@ -1,7 +1,8 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { localLyricsFileExtensions, type LocalLyricsFileExtension } from '../../shared/lyrics/localLyricsFormats';
 
-export type SidecarExtension = '.lrc' | '.ttml' | '.txt';
+export type SidecarExtension = LocalLyricsFileExtension;
 export type SidecarRole = 'primary' | 'translation' | 'romanization';
 export type SidecarLanguageRole = Exclude<SidecarRole, 'primary'>;
 
@@ -17,7 +18,7 @@ export type SidecarSecondaryPaths = {
   romanization: string | null;
 };
 
-const sidecarExtensions: readonly SidecarExtension[] = ['.lrc', '.ttml', '.txt'];
+const sidecarExtensions: readonly SidecarExtension[] = localLyricsFileExtensions;
 
 const romanizationLanguageTags = new Set([
   'rom',

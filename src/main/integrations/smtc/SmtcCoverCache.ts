@@ -3,7 +3,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, extname, join } from 'node:path';
 import { app } from 'electron';
-import sharp from 'sharp';
+import sharp from '../../images/sharpRuntime';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
 import { readResponseBodyLimited } from '../../network/readResponseBodyLimited';
 

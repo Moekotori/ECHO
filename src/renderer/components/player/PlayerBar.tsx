@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { Cable, Captions, CircleAlert, Download, FileDown, Loader2, Monitor, X } from 'lucide-react';
@@ -42,7 +42,11 @@ import { PlayerSpeedControl } from './PlayerSpeedControl';
 import { PlayerStatusChips } from './PlayerStatusChips';
 import { PlayerTransport } from './PlayerTransport';
 import { PlayerVolumeControl } from './PlayerVolumeControl';
-import { SleepTimerButton } from './SleepTimerButton';
+import { PlayerUtilitySwitch } from './PlayerUtilitySwitch';
+import { PlayerUtilitiesPopover } from './PlayerUtilitiesPopover';
+import { PlayerNowPlayingMoreMenu } from './PlayerNowPlayingMoreMenu';
+import { nextPlaybackMode, selectPlaybackMode } from './playbackModePresentation';
+import { SleepTimerPopover } from './SleepTimerPopover';
 import { formatAudioHostError, shouldSuppressAudioHostError } from './audioErrorFormat';
 import { applyMediaSessionSnapshot } from './mediaSession';
 import { startPlaybackProgressUpdates } from './playbackProgressScheduler';
@@ -802,7 +806,7 @@ export const PlayerBar = ({
   const [airPlayReceiverStatus, setAirPlayReceiverStatus] = useState<AirPlayReceiverStatus | null>(null);
   const [, setError] = useState<string | null>(null);
   const [seekPreviewSeconds, setSeekPreviewSeconds] = useState<number | null>(null);
-  const [openPopover, setOpenPopover] = useState<'signal' | 'volume' | 'speed' | null>(null);
+  const [openPopover, setOpenPopover] = useState<'signal' | 'volume' | 'speed' | 'utilities' | null>(null);
   const [isCurrentTrackLiked, setIsCurrentTrackLiked] = useState(false);
   const [smtcEnabled, setSmtcEnabled] = useState(true);
   const [audioAnalysisEnabled, setAudioAnalysisEnabled] = useState<boolean | null>(null);
@@ -845,6 +849,8 @@ export const PlayerBar = ({
   const explicitDacArrivalRouteRef = useRef<string | null>(null);
   const mvPreloadTrackRef = useRef<string | null>(null);
   const seekAnchorRef = useRef<{ positionSeconds: number; trackKey: string | null; updatedAtMs: number } | null>(null);
+  const initialQueueTrackIdRef = useRef(queue.currentTrackId);
+  const residentHostReconciledRef = useRef(false);
   const activeTrackIdRef = useRef<string | null>(null);
   const lastPlaybackActionStatusRef = useRef<{ state: PlaybackStatus['state']; trackId: string | null; filePath: string | null; updatedAtMs: number } | null>(null);
   const transportActionPromiseRef = useRef<Promise<PlaybackStatus | null> | null>(null);
@@ -983,13 +989,23 @@ export const PlayerBar = ({
         (snapshotAudioStatus && appliedAudioStatus ? snapshotAudioStatus.currentTrackId : null) ??
         snapshot.playbackStatus?.currentTrackId ??
         null;
-      if (nextTrackId && shouldAdoptPlaybackIdentity(nextTrackId)) {
-        setQueueCurrentTrackId(resolveQueueTrackIdForPlaybackIdentity(nextTrackId));
+      const residentHostTrackId = appliedAudioStatus && snapshotAudioStatus &&
+        ['loading', 'playing', 'paused'].includes(snapshotAudioStatus.state)
+        ? snapshotAudioStatus.currentTrackId ?? queue.tracks.find((track) =>
+            trackMatchesPlaybackIdentity(track, snapshotAudioStatus.currentFilePath))?.id ?? null
+        : null;
+      const reconcileRestoredSelection = Boolean(residentHostTrackId) &&
+        !residentHostReconciledRef.current && !snapshot.playbackVisualIntent &&
+        queue.currentTrackId === initialQueueTrackIdRef.current;
+      if (residentHostTrackId) residentHostReconciledRef.current = true;
+      const adoptedTrackId = reconcileRestoredSelection ? residentHostTrackId : nextTrackId;
+      if (adoptedTrackId && (reconcileRestoredSelection || shouldAdoptPlaybackIdentity(adoptedTrackId))) {
+        setQueueCurrentTrackId(resolveQueueTrackIdForPlaybackIdentity(adoptedTrackId));
       }
 
       setError(formatAudioHostError(snapshot.error));
     },
-    [applyAudioStatus, resolveQueueTrackIdForPlaybackIdentity, setQueueCurrentTrackId, shouldAdoptPlaybackIdentity],
+    [applyAudioStatus, queue.currentTrackId, queue.tracks, resolveQueueTrackIdForPlaybackIdentity, setQueueCurrentTrackId, shouldAdoptPlaybackIdentity],
   );
 
   const refreshStatus = useCallback(async (): Promise<void> => {
@@ -3028,6 +3044,7 @@ export const PlayerBar = ({
       <motion.footer
         className="player-bar"
         {...playerTrackSwipe.handlers}
+        data-popover-open={openPopover ? 'true' : undefined}
         data-compact-away={lyricsMiniPlayer && lyricsCompactOnIdle ? 'true' : undefined}
         data-low-load-playback={lowLoadPlaybackModeEnabled ? 'true' : undefined}
         data-network-loading={isNetworkPlaybackLoading ? 'true' : undefined}
@@ -3109,7 +3126,7 @@ export const PlayerBar = ({
         {coverEntryMenuPosition ? (
           <PlayerCoverEntryMenu position={coverEntryMenuPosition} opensMv={playerBarCoverOpensMv} onClose={closeCoverEntryMenu} />
         ) : null}
-        <div className="player-track-copy">
+        <div className="player-track-copy-shell"><div className="player-track-copy">
           <PlayerMarqueeText kind="title" text={title} />
           <PlayerMarqueeText kind="subtitle" text={artist} onClick={canOpenCurrentArtist ? handleOpenCurrentArtist : undefined} />
           <PlayerStatusChips
@@ -3125,7 +3142,7 @@ export const PlayerBar = ({
               {playbackLoadingLabel}
             </span>
           ) : null}
-        </div>
+        </div></div>
       </div>
 
       <div className="player-center">
@@ -3159,10 +3176,12 @@ export const PlayerBar = ({
             onPlayPause={() => void handlePlayPause()}
             onPrevious={handlePrevious}
             onCycleRepeatMode={handleCycleRepeatMode}
+            onCyclePlaybackMode={() => selectPlaybackMode(queue, nextPlaybackMode(queue))}
+            useLegacyIcons={lyricsMiniPlayer}
             onOpenQueue={handleOpenQueue}
             onOpenLyrics={handleOpenLyrics}
             onOpenMv={handleOpenMv}
-            showQueueButton={showQueueButton}
+            showQueueButton={lyricsMiniPlayer && showQueueButton}
             onToggleShuffle={queue.toggleShuffle}
             isCurrentTrackLiked={isCurrentTrackLiked}
             canLikeCurrentTrack={Boolean(trackId && (isLibraryCurrentTrack || isProviderLikedStreamingTrack))}
@@ -3186,48 +3205,69 @@ export const PlayerBar = ({
       </div>
 
       <div className="output-status">
-        {isPlayerBarButtonVisible('sleepTimer') ? <SleepTimerButton /> : null}
+        <PlayerNowPlayingMoreMenu
+          track={currentTrack}
+          liked={isCurrentTrackLiked}
+          suppressOpen={Boolean(openPopover)}
+          onMenuOpen={() => setOpenPopover(null)}
+          onTrackUpdated={(track) => updateTrackSnapshot(track.id, track)}
+        />
+        <PlayerUtilitiesPopover
+          isOpen={openPopover === 'utilities'}
+          onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'utilities' : null)}
+          onOpenQueue={showQueueButton ? handleOpenQueue : undefined}
+          sleepPanel={isPlayerBarButtonVisible('sleepTimer') ? (isVisible) => (
+            <SleepTimerPopover embedded isVisible={isVisible} onClose={() => setOpenPopover(null)} />
+          ) : undefined}
+          windowControls={<>
         {isPlayerBarButtonVisible('desktopLyrics') && hasDesktopLyricsBridge ? (
-          <button
-            className={`icon-button ${desktopLyricsVisible ? 'is-soft-active' : ''}`}
-            type="button"
-            aria-label={desktopLyricsVisible ? t('playerBar.aria.hideDesktopLyrics') : t('playerBar.aria.showDesktopLyrics')}
+          <PlayerUtilitySwitch
+            label={t('settings.appearance.playerBarButtons.desktopLyrics')}
+            icon={<Captions size={17} />}
+            checked={desktopLyricsVisible}
+            disabled={!onToggleDesktopLyrics}
             title={desktopLyricsVisible ? t('playerBar.title.hideDesktopLyrics') : t('playerBar.title.showDesktopLyrics')}
-            aria-pressed={desktopLyricsVisible}
             onClick={() => onToggleDesktopLyrics?.()}
             onContextMenu={(event) => {
-              if (!onRevealDesktopLyricsMenu) {
-                return;
-              }
-
+              if (!onRevealDesktopLyricsMenu) return;
               event.preventDefault();
               onRevealDesktopLyricsMenu();
             }}
-          >
-            <Captions size={17} />
-          </button>
+          />
         ) : null}
         {isPlayerBarButtonVisible('miniPlayer') ? (
-          <button
-            className={`icon-button ${miniPlayerState?.visible ? 'is-soft-active' : ''}`}
-            type="button"
-            aria-label={miniPlayerState?.visible ? t('playerBar.aria.hideMiniPlayer') : t('playerBar.aria.showMiniPlayer')}
-            title={miniPlayerState?.visible ? t('playerBar.aria.hideMiniPlayer') : t('playerBar.aria.showMiniPlayer')}
+          <PlayerUtilitySwitch
+            label={t('settings.appearance.playerBarButtons.miniPlayer')}
+            icon={isMiniPlayerBusy ? <Loader2 className="spinning-icon" size={17} /> : <Monitor size={17} />}
+            checked={miniPlayerState?.visible === true}
             disabled={!window.echo?.miniPlayer || isMiniPlayerBusy}
             onClick={() => void handleToggleMiniPlayer()}
+          />
+        ) : null}
+        {isPlayerBarButtonVisible('audioExport') && !isCurrentStreamingTrack ? (
+          <button
+            className="player-utility-action"
+            type="button"
+            aria-label="导出当前文件"
+            title={audioExportButtonTitle}
+            disabled={!canExportCurrentAudio || isAudioExporting}
+            onClick={() => void handleExportCurrentAudio()}
           >
-            {isMiniPlayerBusy ? <Loader2 className="spinning-icon" size={17} /> : <Monitor size={17} />}
+            {isAudioExporting ? <Loader2 className="spinning-icon" size={17} /> : <FileDown size={17} />}<span>{audioExportButtonTitle}</span>
           </button>
         ) : null}
+          </>}
+        >
         {isPlayerBarButtonVisible('volume') ? (
           <PlayerVolumeControl
             status={audioStatus}
             fixedVolumeEnabled={fixedVolumeEnabled || dsdAutoVolumeLocked}
             fixedVolumeAutoReason={dsdAutoVolumeLocked ? t('playerVolume.fixed.dsdAutoLocked') : null}
-            isOpen={openPopover === 'volume'}
+            embedded
+            isOpen={openPopover === 'utilities'}
             onError={setError}
             onFixedVolumeChange={setFixedVolumeEnabled}
-            onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'volume' : null)}
+            onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'utilities' : null)}
             onStatusChange={setAudioStatus}
             onCommitVolume={isSpotifyCurrentTrack ? setSpotifyVolume : undefined}
           />
@@ -3235,24 +3275,14 @@ export const PlayerBar = ({
         {isPlayerBarButtonVisible('speed') && !isSpotifyCurrentTrack ? (
           <PlayerSpeedControl
             status={audioStatus}
-            isOpen={openPopover === 'speed'}
+            embedded
+            isOpen={openPopover === 'utilities'}
             onError={setError}
-            onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'speed' : null)}
+            onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'utilities' : null)}
             onStatusChange={setAudioStatus}
           />
         ) : null}
-        {isPlayerBarButtonVisible('audioExport') && !isCurrentStreamingTrack ? (
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="导出当前文件"
-            title={audioExportButtonTitle}
-            disabled={!canExportCurrentAudio || isAudioExporting}
-            onClick={() => void handleExportCurrentAudio()}
-          >
-            {isAudioExporting ? <Loader2 className="spinning-icon" size={17} /> : <FileDown size={17} />}
-          </button>
-        ) : null}
+        </PlayerUtilitiesPopover>
       </div>
       </motion.footer>
     </>

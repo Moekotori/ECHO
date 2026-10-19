@@ -1,3 +1,5 @@
+import { libraryPageParityJaJP } from './libraryPageParityFamily';
+import { communityLibraryJaJPMessages } from './communityLibraryFamily';
 import type { TranslationDictionary, TranslationKey } from '../locales';
 import { albumSplitJaJPMessages } from './albumSplitFamily';
 import { likedPageEnUS as likedPageJaJP, mediaLibraryEnUS as mediaLibraryJaJP, settingsAboutDangerEnUS as settingsAboutDangerJaJP, settingsIntegrationsExtraEnUS as settingsIntegrationsExtraJaJP, songsPageEnUS as songsPageJaJP } from './enFamily';
@@ -148,6 +150,7 @@ const audioSignalPathExtrasJaJP = {
 };
 
 export const jaJP: TranslationDictionary = {
+  ...communityLibraryJaJPMessages,
   'common.skipToContent': 'メインコンテンツへ移動',
   'userNotice.action.accept': '読み、同意しました',
   'userNotice.action.communityBoundaries': 'コミュニティ境界',
@@ -2758,9 +2761,9 @@ export const jaJP: TranslationDictionary = {
   'songs.osuHiFi.error.notFound': '曲名とアーティストが完全一致するロスレス音源が見つかりません: {title} - {artist}',
   'songs.osuHiFi.error.playFailed': 'ロスレス音源を照合または再生できませんでした。',
   'songs.filter.button': 'フィルター',
-  'songs.filter.menuAria': '曲のフィルター',
-  'songs.filter.section': 'フィルター',
-  'songs.filter.audioFormat': 'サンプルレート / DSD',
+  'songs.filter.menuAria': '曲の絞り込み',
+  'songs.filter.section': '絞り込み',
+  'songs.filter.audioFormat': '音声形式',
   'songs.filter.audioFormat.all': 'すべての形式',
   'songs.filter.audioFormat.sampleRate44100': '44.1 kHz',
   'songs.filter.audioFormat.sampleRate48000': '48 kHz',
@@ -3707,7 +3710,7 @@ export const jaJP: TranslationDictionary = {
   'settings.integrations.mobile.description': '将来の外部デバイス機能は制御された IPC を通し、Renderer がシステムリソースへ直接接続しないようにします。',
   'settings.integrations.accounts.cookieFallback': 'ログイン後に Cookie は自動保存されます。手動貼り付けは予備手段です。',
   'settings.integrations.accounts.cookiePlaceholder': 'Cookie を貼り付けて保存',
-  'settings.integrations.accounts.description.default': '歌詞、メタデータ、ダウンロード連携用の予約枠です。',
+  'settings.integrations.accounts.description.default': 'ストリーミングのプレイリスト、オンライン再生、ライブラリ情報を利用するためにログインします。',
   'settings.integrations.accounts.description.bilibili': 'MV 解析と高画質再生に使います。',
   'settings.integrations.accounts.loginAndSync': 'ログインして同期',
   'settings.integrations.accounts.clickToLogin': '未ログイン クリックしてログイン',
@@ -5094,6 +5097,46 @@ export const jaJP: TranslationDictionary = {
   'settings.remote.ux.browser.coverLabel': 'ジャケット {status}',
   'settings.remote.ux.browser.lyricsLabel': '歌詞 {status}',
   'settings.remote.ux.issue.view': '{kind} の問題を表示',
+  'songs.filter.audioFormat.other': 'その他の形式',
+  'songs.filter.sampleRate': 'サンプルレート',
+  'songs.filter.sampleRate.all': 'すべてのサンプルレート',
+  'songs.search.empty': 'この検索に一致する曲はありません',
+  'songs.sort.albumDesc': 'アルバム Z-A',
+  'songs.sort.artistDesc': 'アーティスト Z-A',
+  'songs.sort.bitrateAsc': 'ビットレート（低い順）',
+  'songs.sort.bitrateDesc': 'ビットレート（高い順）',
+  'songs.sort.codecAsc': 'コーデック（A-Z）',
+  'songs.sort.codecDesc': 'コーデック（Z-A）',
+  'songs.sort.multi.hint': '選択した順に優先されます',
+  'songs.sort.multi.label': '複数条件で並び替え',
+  'songs.sort.multiCount': '{count} 件の並び替え',
+  'songs.filter.activeCount': '{count} 件の条件',
+  'songs.filter.audioFormat.aac': 'AAC',
+  'songs.filter.audioFormat.aiff': 'AIFF',
+  'songs.filter.audioFormat.alac': 'ALAC',
+  'songs.filter.audioFormat.flac': 'FLAC',
+  'songs.filter.audioFormat.mp3': 'MP3',
+  'songs.filter.audioFormat.ogg': 'Ogg Vorbis',
+  'songs.filter.audioFormat.opus': 'Opus',
+  'songs.filter.audioFormat.wav': 'WAV',
+  'songs.filter.condition': '条件',
+  'songs.filter.condition.all': 'すべての曲',
+  'songs.filter.folder': 'フォルダー',
+  'songs.filter.folder.all': 'すべてのフォルダー',
+  'songs.filter.folder.empty': '取り込まれたフォルダーはありません',
+  'songs.filter.folder.loading': 'フォルダーを読み込み中…',
+  'songs.filter.genre': 'ジャンル',
+  'songs.filter.genre.all': 'すべてのジャンル',
+  'songs.filter.genre.aria': 'ジャンルで絞り込む',
+  'songs.filter.hint': '複数の条件を組み合わせられます',
+  'songs.filter.reset': 'リセット',
+  'songs.filter.sampleRate.group.hiRes': 'Hi-Res',
+  'songs.filter.sampleRate.group.other': 'その他',
+  'songs.filter.sampleRate.group.standard': '標準',
+  'songs.filter.year': '年',
+  'songs.filter.year.all': 'すべての年',
+  'songs.filter.year.aria': 'リリース年で絞り込む',
+  ...libraryPageParityJaJP,
 };
 
 export default jaJP;

@@ -1,3 +1,9 @@
+import { libraryReadStatement } from './LibraryReadStatements';
+import { folderInsightFilterSql, hiddenDuplicateTrackSql } from './folderTrackFilters';
+import type { LibrarySort } from '../../shared/types/library';
+import { unifiedTrackOrderSql } from './LibraryTrackSortOrder';
+import { LibraryCountCache } from './LibraryCountCache';
+import { unifiedTrackFileFormatFilterSql } from './trackFileFormatFilter';
 import { runSteps, runCooperativeSteps } from './CooperativeSteps';
 import { LibraryMaintenanceWorkspace } from './LibraryMaintenanceWorkspace';
 import { createHash, randomUUID } from 'node:crypto';
@@ -16,7 +22,9 @@ import {
   preloadSearchIndexRomanizer,
   type SearchIndexTrackFields,
 } from './SearchIndexTokens';
+import { hasSidecarCueTracks } from './CueTrackReferences';
 import { libraryTextSortKey } from './LibrarySortKey';
+import { trackSortProjection } from './TrackSortProjection';
 import { normalizeAlbumTitleForLooseMerge, type AlbumKeyInput, type AlbumMergeStrategy, type AlbumService } from './AlbumService';
 import {
   artistMergeKeyForName,
@@ -1129,11 +1137,13 @@ export class LibraryStore {
   private groupingMaintenanceTail: Promise<void> = Promise.resolve();
   private lastTracksQueryMs: number | null = null;
   private lastAlbumsQueryMs: number | null = null;
+  private readonly countCache: LibraryCountCache;
 
   constructor(
     private readonly database: EchoDatabase,
     private readonly readSearchOptions: () => LibraryStoreSearchOptions = () => ({ chineseCrossScriptSearchEnabled: true }),
   ) {
+    this.countCache = new LibraryCountCache(database);
     this.database.function('echo_artist_merge_key', (value: unknown) => {
       const strategy = normalizeArtistMergeStrategy(this.readSearchOptions().artistMergeStrategy);
       return artistMergeKeyForName(value, strategy);
@@ -1210,11 +1220,15 @@ export class LibraryStore {
     if (this.hasMaintenanceFlag(japaneseRomajiSearchTermsFlag)) {
       return 0;
     }
-    if (!(await preloadSearchIndexRomanizer())) {
-      return 0;
-    }
-
-    const changed = (await this.rebuildLocalJapaneseSearchTerms()) + (await this.rebuildRemoteJapaneseSearchTerms());
+    // Empty/Latin-only libraries do not need a resident Japanese dictionary.
+    // Preserve failure/retry semantics: never mark a failed initialization complete.
+    let readiness: Promise<boolean> | null = null;
+    const ensureReady = (): Promise<boolean> => readiness ??= preloadSearchIndexRomanizer();
+    const local = await this.rebuildLocalJapaneseSearchTerms(ensureReady);
+    if (local === null) return 0;
+    const remote = await this.rebuildRemoteJapaneseSearchTerms(ensureReady);
+    if (remote === null) return local;
+    const changed = local + remote;
     this.setMaintenanceFlag(japaneseRomajiSearchTermsFlag, 'complete');
     return changed;
   }
@@ -1269,7 +1283,7 @@ export class LibraryStore {
       .run(key, value, nowIso());
   }
 
-  private async rebuildLocalJapaneseSearchTerms(): Promise<number> {
+  private async rebuildLocalJapaneseSearchTerms(ensureReady: () => Promise<boolean>): Promise<number | null> {
     const selectRows = this.database.prepare<[number, number], DbRow>(
       `SELECT rowid, id, path, title, artist, album, album_artist, genre, search_terms
        FROM tracks
@@ -1303,6 +1317,7 @@ export class LibraryStore {
         if (!hasJapaneseSearchText(fields)) {
           continue;
         }
+        if (!(await ensureReady())) return null;
 
         const searchTerms = await buildTrackSearchTermsAsync(fields);
         if (searchTerms && searchTerms !== String(row.search_terms ?? '')) {
@@ -1325,7 +1340,7 @@ export class LibraryStore {
     return changed;
   }
 
-  private async rebuildRemoteJapaneseSearchTerms(): Promise<number> {
+  private async rebuildRemoteJapaneseSearchTerms(ensureReady: () => Promise<boolean>): Promise<number | null> {
     const selectRows = this.database.prepare<[number, number], DbRow>(
       `SELECT rowid, id, remote_path, title, artist, album, album_artist, genre, search_terms
        FROM remote_tracks
@@ -1359,6 +1374,7 @@ export class LibraryStore {
         if (!hasJapaneseSearchText(fields)) {
           continue;
         }
+        if (!(await ensureReady())) return null;
 
         const searchTerms = await buildTrackSearchTermsAsync(fields);
         if (searchTerms && searchTerms !== String(row.search_terms ?? '')) {
@@ -1597,7 +1613,7 @@ export class LibraryStore {
       likePredicate('tracks.path'),
     ], searchOptions);
     const excludeTrackIdsSql = excludeTrackIds.length > 0 ? `tracks.id NOT IN (${excludeTrackIds.map(() => '?').join(', ')})` : '';
-    const whereParts = [scope.sql, searchFilter.sql, excludeTrackIdsSql].filter(Boolean);
+    const whereParts = [scope.sql, searchFilter.sql, excludeTrackIdsSql, folderInsightFilterSql(query.folderInsight), hiddenDuplicateTrackSql(query.hideDuplicates === true && query.folderInsight !== 'duplicates')].filter(Boolean);
     const whereSql = `WHERE ${whereParts.join(' AND ')}`;
     const params = [...scope.params, ...searchFilter.params, ...excludeTrackIds];
     const selectSql = `SELECT
@@ -1612,9 +1628,9 @@ export class LibraryStore {
         tracks.network_metadata_status, tracks.field_sources_json
        FROM tracks
        ${whereSql}`;
-    const orderSql = this.trackOrderSql(sort);
-    const totalRow = this.getRow(`SELECT COUNT(*) AS total FROM tracks ${whereSql}`, ...params);
-    const total = Number(totalRow?.total ?? 0);
+    const orderSql = this.trackOrderSql(sort) + (sort === 'random' ? '' : ', tracks.id ASC');
+    const hydrateSql = selectSql.replace(whereSql, 'INNER JOIN selected_track_ids ON selected_track_ids.id = tracks.id');
+    const total = this.countCache.read(`SELECT COUNT(*) AS total FROM tracks ${whereSql}`, params);
     const rows =
       randomWindow && sort === 'random'
         ? (() => {
@@ -1630,25 +1646,24 @@ export class LibraryStore {
 
             return shuffleRows(
               this.allRows(
-                `WITH folder_tracks AS (
-                  ${selectSql}
-                ),
-                sampled_tracks AS (
-                  SELECT *, ROW_NUMBER() OVER () AS echo_random_row_number
-                  FROM folder_tracks
+                `WITH sampled_tracks AS (
+                  SELECT tracks.id, ROW_NUMBER() OVER () AS echo_random_row_number
+                  FROM tracks ${whereSql}
+                ), selected_track_ids AS MATERIALIZED (
+                  SELECT id FROM sampled_tracks
+                  WHERE echo_random_row_number IN (${rowNumbers.map(() => '?').join(', ')})
                 )
-                SELECT *
-                FROM sampled_tracks
-                WHERE echo_random_row_number IN (${rowNumbers.map(() => '?').join(', ')})`,
+                ${hydrateSql}`,
                 ...params,
                 ...rowNumbers,
               ),
             ).slice(0, pageSize);
           })()
         : this.allRows(
-            `${selectSql}
-       ${orderSql}
-       LIMIT ? OFFSET ?`,
+            `WITH selected_track_ids AS MATERIALIZED (
+         SELECT tracks.id FROM tracks ${whereSql} ${orderSql} LIMIT ? OFFSET ?
+       )
+       ${hydrateSql} ${orderSql}`,
             ...params,
             pageSize,
             offset,
@@ -2465,6 +2480,10 @@ export class LibraryStore {
         if (Number(row.missing) === 0) yield resolve(String(row.path));
       }
     }
+  }
+
+  async hasSidecarCueTracks(folderId: string, isCurrent: () => boolean): Promise<boolean> {
+    return hasSidecarCueTracks((sql, ...parameters) => this.allRows(sql, ...parameters), folderId, isCurrent);
   }
 
   getTrackFingerprintsByFolder(folderId: string): Map<string, StoredTrackFingerprint> {
@@ -3633,11 +3652,11 @@ export class LibraryStore {
       }
 
       const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-      const totalRow = this.getRow(
+      const total = this.countCache.read(
         `SELECT COUNT(DISTINCT COALESCE(stable_key, track_id, track_path)) AS total
          FROM playback_history
          ${whereSql}`,
-        ...params,
+        params,
       );
       const rows = this.allRows(
         `WITH filtered_history AS (
@@ -3705,8 +3724,6 @@ export class LibraryStore {
         pageSize,
         offset,
       );
-      const total = Number(totalRow?.total ?? 0);
-
       return {
         items: rows.map((row) => this.mapPlaybackHistoryEntry(row)),
         page,
@@ -3752,11 +3769,11 @@ export class LibraryStore {
     }
 
     const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    const totalRow = this.getRow(
+    const total = this.countCache.read(
       `SELECT COUNT(*) AS total
        FROM playback_history_stats
        ${whereSql}`,
-      ...params,
+      params,
     );
     const rows = this.allRows(
       `SELECT
@@ -3794,8 +3811,6 @@ export class LibraryStore {
       pageSize,
       offset,
     );
-    const total = Number(totalRow?.total ?? 0);
-
     return {
       items: rows.map((row) => this.mapPlaybackHistoryEntry(row)),
       page,
@@ -6378,6 +6393,13 @@ export class LibraryStore {
     return albumKeys;
   }
 
+  getSongFilterGenres(source: 'local' | 'remote'): string[] {
+    const sql = source === 'remote'
+      ? "SELECT DISTINCT trim(remote_tracks.genre) AS name FROM remote_tracks INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id WHERE remote_tracks.availability != 'missing' AND remote_sources.status = 'enabled' AND trim(COALESCE(remote_tracks.genre, '')) != '' ORDER BY name COLLATE NOCASE LIMIT 256"
+      : "SELECT DISTINCT trim(genre) AS name FROM tracks WHERE missing = 0 AND trim(COALESCE(genre, '')) != '' ORDER BY name COLLATE NOCASE LIMIT 256";
+    return this.allRows(sql).map((row) => String(row.name));
+  }
+
   getTracks(query?: LibraryPageQuery): LibraryPage<LibraryTrack> {
     const startedAt = performance.now();
     const { page, pageSize, search, sort, sourceProvider, sourceId, excludeTrackIds, randomWindow } = pageFromQuery(query);
@@ -6390,8 +6412,6 @@ export class LibraryStore {
     const searchQuery = buildFtsSearchQuery(search, searchOptions);
     const searchJoinSql = searchQuery ? 'INNER JOIN tracks_fts ON tracks_fts.rowid = tracks.rowid' : '';
     const remoteSearchJoinSql = searchQuery && !showDuplicatesOnly ? 'INNER JOIN remote_tracks_fts ON remote_tracks_fts.rowid = remote_tracks.rowid' : '';
-    const localSearchRankSql = searchQuery ? 'bm25(tracks_fts)' : '0';
-    const remoteSearchRankSql = searchQuery && !showDuplicatesOnly ? 'bm25(remote_tracks_fts)' : '0';
     const filterDuplicates = hideDuplicates || showDuplicatesOnly;
     // Build the membership set once. Joining each track against all groups in
     // the selected mode makes large duplicate indexes block startup for seconds.
@@ -6404,33 +6424,48 @@ export class LibraryStore {
           WHERE duplicate_groups.mode = ?${showDuplicatesOnly ? '' : ' AND duplicate_members.hidden != 0'}
         )`
       : '';
-    const whereSql = searchQuery
-      ? `WHERE tracks.missing = 0${duplicateFilterSql} AND tracks_fts MATCH ?`
-      : `WHERE tracks.missing = 0${duplicateFilterSql}`;
-    const baseParams = [
-      ...(filterDuplicates ? [duplicateMode] : []),
-      ...(searchQuery ? [searchQuery] : []),
-    ];
-    const remoteWhereSql = showDuplicatesOnly
-      ? 'WHERE 0 = 1'
-      : searchQuery
-      ? "WHERE remote_tracks.availability != 'missing' AND remote_sources.status = 'enabled' AND remote_tracks_fts MATCH ?"
-      : "WHERE remote_tracks.availability != 'missing' AND remote_sources.status = 'enabled'";
-    const allParams = [...baseParams, ...(searchQuery && !showDuplicatesOnly ? [searchQuery] : [])];
-    const excludeTrackIdsSql = excludeTrackIds.length > 0 ? `id NOT IN (${excludeTrackIds.map(() => '?').join(', ')})` : '';
-    const audioFormatFilterSql = unifiedTrackAudioFormatFilterSql(query?.audioFormatFilter);
-    const osuOnlyFilterSql = query?.showOsuOnly === true ? osuImportedTrackSql : '';
-    const libraryWhereParts = [
-      mediaTypeFilter ? 'media_type = ?' : '',
-      sourceId ? 'source_id = ?' : '',
-      osuOnlyFilterSql,
-      audioFormatFilterSql,
-      excludeTrackIdsSql,
-    ].filter(Boolean);
-    const mediaTypeWhereSql = libraryWhereParts.length > 0 ? `WHERE ${libraryWhereParts.join(' AND ')}` : '';
-    const pageParams = [...allParams, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : []), ...excludeTrackIds];
-    const includePlaybackStats = sort === 'lastPlayed' || sort === 'playCountAsc' || sort === 'playCountDesc';
-    const buildUnifiedTracksSql = (withPlaybackStats: boolean): string => {
+    const folderIds = Array.from(new Set(query?.folderIds ?? [])).slice(0, 128);
+    const extraFilters = (table: 'tracks' | 'remote_tracks'): { sql: string; params: unknown[] } => {
+      const local = table === 'tracks';
+      const clauses: string[] = [];
+      const params: unknown[] = [];
+      if ((local && (mediaTypeFilter === 'remote' || sourceId)) || (!local && (mediaTypeFilter === 'local' || showDuplicatesOnly || query?.showOsuOnly || query?.folderInsight || folderIds.length))) {
+        return { sql: ' AND 0 = 1', params };
+      }
+      if (!local && sourceId) { clauses.push(`${table}.source_id = ?`); params.push(sourceId); }
+      if (local) {
+        const insightSql = folderInsightFilterSql(query?.folderInsight);
+        if (insightSql) clauses.push(insightSql);
+      }
+      if (local && folderIds.length) {
+        clauses.push(`tracks.folder_id IN (${folderIds.map(() => '?').join(', ')})`);
+        params.push(...folderIds);
+      }
+      if (query?.showOsuOnly) clauses.push(`(${osuFieldSourceSql} OR ${osuLegacyAlbumSql})`.replace(/\b(field_sources_json|album)\b/g, 'tracks.$1'));
+      const audioSql = unifiedTrackAudioFormatFilterSql(query?.audioFormatFilter);
+      if (audioSql) clauses.push(audioSql.replace(/\b(codec|sample_rate)\b/g, `${table}.$1`));
+      const formatSql = unifiedTrackFileFormatFilterSql(query?.fileFormatFilter, {
+        codec: `${table}.codec`, sampleRate: `${table}.sample_rate`,
+        path: local ? 'tracks.path' : 'remote_tracks.remote_path',
+      });
+      if (formatSql) clauses.push(formatSql);
+      if (Number.isInteger(query?.filterYear)) { clauses.push(`${table}.year = ?`); params.push(query!.filterYear); }
+      if (query?.filterGenre?.trim()) { clauses.push(`${table}.genre = ? COLLATE NOCASE`); params.push(query.filterGenre.trim()); }
+      if (excludeTrackIds.length) {
+        clauses.push(`${table}.id NOT IN (${excludeTrackIds.map(() => '?').join(', ')})`);
+        params.push(...excludeTrackIds);
+      }
+      return { sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '', params };
+    };
+    const localFilters = extraFilters('tracks');
+    const remoteFilters = extraFilters('remote_tracks');
+    const whereSql = `WHERE tracks.missing = 0${duplicateFilterSql}${searchQuery ? ' AND tracks_fts MATCH ?' : ''}${localFilters.sql}`;
+    const remoteWhereSql = `WHERE remote_tracks.availability != 'missing' AND remote_sources.status = 'enabled'${searchQuery && !showDuplicatesOnly ? ' AND remote_tracks_fts MATCH ?' : ''}${remoteFilters.sql}`;
+    const baseParams = [...(filterDuplicates ? [duplicateMode] : []), ...(searchQuery ? [searchQuery] : []), ...localFilters.params];
+    const pageParams = [...baseParams, ...(searchQuery && !showDuplicatesOnly ? [searchQuery] : []), ...remoteFilters.params];
+    const sorts = query?.sorts?.length ? query.sorts.slice(0, 32) : [sort as LibrarySort];
+    const includePlaybackStats = sorts.some((value) => ['lastPlayed', 'playCountAsc', 'playCountDesc', 'frequent'].includes(value));
+    const buildUnifiedTracksSql = (withPlaybackStats: boolean, mode: 'candidates' | 'hydrate'): string => {
       const playbackStatsCtes = withPlaybackStats
         ? `local_playback_stats AS (
       SELECT
@@ -6454,28 +6489,21 @@ export class LibraryStore {
       GROUP BY provider, stable_key
     ),`
         : '';
-      const localPlaybackColumns = withPlaybackStats
-        ? `COALESCE(local_playback_stats.play_count, 0) AS play_count,
-        local_playback_stats.last_played_at AS last_played_at`
-        : `tracks.play_count,
-        tracks.last_played_at`;
       const localPlaybackJoin = withPlaybackStats
         ? 'LEFT JOIN local_playback_stats ON local_playback_stats.track_id = tracks.id'
         : '';
-      const remotePlaybackColumns = withPlaybackStats
-        ? `COALESCE(remote_playback_stats.play_count, 0) AS play_count,
-        remote_playback_stats.last_played_at AS last_played_at`
-        : `0 AS play_count,
-        NULL AS last_played_at`;
       const remotePlaybackJoin = withPlaybackStats
         ? `LEFT JOIN remote_playback_stats
           ON remote_playback_stats.provider = remote_tracks.provider
          AND remote_playback_stats.stable_key = remote_tracks.stable_key`
         : '';
 
-      return `WITH ${playbackStatsCtes} library_tracks AS (
+      const projection = (media: 'local' | 'remote', full: string): string => mode === 'candidates'
+        ? trackSortProjection(sorts, Boolean(searchQuery) && (media === 'local' || !showDuplicatesOnly), media, withPlaybackStats)
+        : full;
+      return `WITH ${playbackStatsCtes} library_tracks AS NOT MATERIALIZED (
       SELECT
-        tracks.id,
+      ${projection('local', `tracks.id,
         'local' AS media_type,
         tracks.path,
         NULL AS source_id,
@@ -6512,15 +6540,13 @@ export class LibraryStore {
         tracks.updated_at,
         tracks.mtime_ms,
         tracks.size_bytes,
-        ${localPlaybackColumns},
-        ${localSearchRankSql} AS search_rank
+        selected_tracks.play_count, selected_tracks.last_played_at,
+        selected_tracks.search_rank AS search_rank`)}
       FROM tracks
-      ${searchJoinSql}
-      ${localPlaybackJoin}
-      ${whereSql}
+      ${mode === 'hydrate' ? "INNER JOIN selected_tracks ON selected_tracks.media_type = 'local' AND selected_tracks.id = tracks.id" : `${searchJoinSql} ${localPlaybackJoin} ${whereSql}`}
       UNION ALL
       SELECT
-        remote_tracks.id,
+      ${projection('remote', `remote_tracks.id,
         'remote' AS media_type,
         'remote://' || remote_tracks.source_id || remote_tracks.remote_path AS path,
         remote_tracks.source_id,
@@ -6557,22 +6583,21 @@ export class LibraryStore {
         remote_tracks.updated_at,
         COALESCE(CAST(strftime('%s', remote_tracks.modified_at) AS INTEGER) * 1000, 0) AS mtime_ms,
         remote_tracks.size_bytes,
-        ${remotePlaybackColumns},
-        ${remoteSearchRankSql} AS search_rank
+        selected_tracks.play_count, selected_tracks.last_played_at,
+        selected_tracks.search_rank AS search_rank`)}
       FROM remote_tracks
       INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id
-      ${remotePlaybackJoin}
-      ${remoteSearchJoinSql}
-      ${remoteWhereSql}
+      ${mode === 'hydrate' ? "INNER JOIN selected_tracks ON selected_tracks.media_type = 'remote' AND selected_tracks.id = remote_tracks.id" : `${remotePlaybackJoin} ${remoteSearchJoinSql} ${remoteWhereSql}`}
     )`;
     };
-    const countUnifiedTracksSql = buildUnifiedTracksSql(false);
-    const unifiedTracksSql = includePlaybackStats ? buildUnifiedTracksSql(true) : countUnifiedTracksSql;
-    const orderSql = this.unifiedTrackOrderSql(sort, Boolean(searchQuery));
-    const totalRow = this.getRow(`${countUnifiedTracksSql} SELECT COUNT(*) AS total FROM library_tracks ${mediaTypeWhereSql}`, ...pageParams);
-    const total = Number(totalRow?.total ?? 0);
+    const orderSql = unifiedTrackOrderSql(sorts, Boolean(searchQuery));
+    // Count only membership columns, avoiding the wide metadata/playback CTE on every page.
+    const total = this.countCache.read(`SELECT (
+      (SELECT COUNT(*) FROM tracks ${searchJoinSql} ${whereSql}) +
+      (SELECT COUNT(*) FROM remote_tracks INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id ${remoteSearchJoinSql} ${remoteWhereSql})
+    ) AS total`, pageParams);
     const rows =
-      randomWindow && sort === 'random'
+      randomWindow && sorts[0] === 'random'
         ? (() => {
             if (total <= 0) {
               return [];
@@ -6586,27 +6611,31 @@ export class LibraryStore {
 
             return shuffleRows(
               this.allRows(
-                `${unifiedTracksSql},
+                `${buildUnifiedTracksSql(false, 'candidates')},
       sampled_tracks AS (
         SELECT *, ROW_NUMBER() OVER () AS echo_random_row_number
         FROM library_tracks
-        ${mediaTypeWhereSql}
+      ),
+      selected_tracks AS MATERIALIZED (
+        SELECT * FROM sampled_tracks
+        WHERE echo_random_row_number IN (${rowNumbers.map(() => '?').join(', ')})
+      ), hydrated_tracks AS (
+        ${buildUnifiedTracksSql(false, 'hydrate')} SELECT * FROM library_tracks
       )
-      SELECT *
-      FROM sampled_tracks
-      WHERE echo_random_row_number IN (${rowNumbers.map(() => '?').join(', ')})`,
+      SELECT * FROM hydrated_tracks`,
                 ...pageParams,
                 ...rowNumbers,
               ),
             ).slice(0, pageSize);
           })()
         : this.allRows(
-            `${unifiedTracksSql}
-      SELECT *
-      FROM library_tracks
-      ${mediaTypeWhereSql}
-      ${orderSql}
-      LIMIT ? OFFSET ?`,
+            `${buildUnifiedTracksSql(includePlaybackStats, 'candidates')},
+      selected_tracks AS MATERIALIZED (
+        SELECT * FROM library_tracks ${orderSql} LIMIT ? OFFSET ?
+      ), hydrated_tracks AS (
+        ${buildUnifiedTracksSql(false, 'hydrate')} SELECT * FROM library_tracks
+      )
+      SELECT * FROM hydrated_tracks ${orderSql}`,
             ...pageParams,
             pageSize,
             offset,
@@ -6715,11 +6744,14 @@ export class LibraryStore {
     ].filter(Boolean);
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
     const whereParams = [...searchFilter.params, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : [])];
+    const folderIds = Array.from(new Set(query?.folderIds ?? [])).slice(0, 128);
+    const scope = { mediaType: mediaTypeFilter, sourceId, folderIds, searchActive: Boolean(search) };
+    const scopeParams = [...(sourceId ? [sourceId] : []), ...folderIds];
     const includePlaybackStats = sort === 'lastPlayed' || sort === 'playCountAsc' || sort === 'playCountDesc';
-    const orderSql = this.unifiedAlbumOrderSql(sort);
-    const countAlbumsSql = this.unifiedAlbumsSql();
-    const albumsSql = includePlaybackStats ? this.unifiedAlbumsSql(true) : countAlbumsSql;
-    const totalRow = this.getRow(`${countAlbumsSql} SELECT COUNT(*) AS total FROM library_albums ${whereSql}`, ...whereParams);
+    const orderSql = this.unifiedAlbumOrderSql(sort) + (sort === 'random' ? '' : ', id ASC');
+    const countAlbumsSql = this.unifiedAlbumsSql(false, { ...scope, sort: 'default' });
+    const albumsSql = includePlaybackStats ? this.unifiedAlbumsSql(true, { ...scope, sort }) : this.unifiedAlbumsSql(false, { ...scope, sort });
+    const total = this.countCache.read(`${countAlbumsSql} SELECT COUNT(*) AS total FROM library_albums ${whereSql}`, [...scopeParams, ...whereParams], JSON.stringify(searchOptions));
     const rows = this.allRows(
       `${albumsSql}
       SELECT
@@ -6729,12 +6761,10 @@ export class LibraryStore {
       ${whereSql}
       ${orderSql}
       LIMIT ? OFFSET ?`,
-      ...whereParams,
+      ...scopeParams, ...whereParams,
       pageSize,
       offset,
     );
-    const total = Number(totalRow?.total ?? 0);
-
     try {
       return {
         items: rows.map((row) => this.mapAlbum(row)),
@@ -6781,7 +6811,13 @@ export class LibraryStore {
     END`;
   }
 
-  private unifiedAlbumsSql(includePlaybackStats = false): string {
+  private unifiedAlbumsSql(includePlaybackStats = false, scope: {
+    mediaType?: 'local' | 'remote' | null; sourceId?: string | null; folderIds?: string[]; searchActive?: boolean; sort?: string;
+  } = {}): string {
+    const folderIds = scope.folderIds ?? [];
+    const localScopeSql = `${scope.mediaType === 'remote' || scope.sourceId ? ' AND 0 = 1' : ''}${folderIds.length ? ` AND tracks.folder_id IN (${folderIds.map(() => '?').join(', ')})` : ''}`;
+    const remoteScopeSql = `${scope.mediaType === 'local' || folderIds.length ? ' AND 0 = 1' : ''}${scope.sourceId ? ' AND remote_tracks.source_id = ?' : ''}`;
+
     const remoteAlbumIdentity = this.remoteAlbumIdentitySql('remote_tracks');
     const playbackStatsCtes = includePlaybackStats
       ? `local_track_playback_stats AS (
@@ -6850,7 +6886,7 @@ export class LibraryStore {
       INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id
       ${remotePlaybackJoin}
       WHERE remote_tracks.availability != 'missing'
-        AND remote_sources.status = 'enabled'
+        AND remote_sources.status = 'enabled'${remoteScopeSql}
     ),
     local_albums AS (
       SELECT
@@ -6868,28 +6904,28 @@ export class LibraryStore {
         albums.cover_id,
         albums.created_at,
         albums.updated_at,
-        COALESCE((
+        ${scope.sort === undefined || scope.sort === 'recent' ? `COALESCE((
           SELECT MAX(tracks.created_at)
           FROM album_tracks
           INNER JOIN tracks ON tracks.id = album_tracks.track_id
           WHERE album_tracks.album_id = albums.id
             AND tracks.missing = 0
-        ), albums.created_at) AS added_at,
-        COALESCE((
+        ), albums.created_at)` : 'albums.created_at'} AS added_at,
+        ${scope.sort === undefined || scope.sort.startsWith('fileModified') ? `COALESCE((
           SELECT MAX(tracks.mtime_ms)
           FROM album_tracks
           INNER JOIN tracks ON tracks.id = album_tracks.track_id
           WHERE album_tracks.album_id = albums.id
             AND tracks.missing = 0
-        ), 0) AS sort_mtime_ms,
+        ), 0)` : '0'} AS sort_mtime_ms,
         ${localPlaybackColumns},
-        albums.title || ' ' || albums.album_artist || ' ' || COALESCE(CAST(albums.year AS TEXT), '') || ' ' || COALESCE((
+        ${scope.searchActive !== false ? `albums.title || ' ' || albums.album_artist || ' ' || COALESCE(CAST(albums.year AS TEXT), '') || ' ' || COALESCE((
           SELECT GROUP_CONCAT(tracks.search_terms || ' ' || tracks.title || ' ' || tracks.artist || ' ' || tracks.album_artist || ' ' || COALESCE(tracks.genre, '') || ' ' || tracks.path, ' ')
           FROM album_tracks
           INNER JOIN tracks ON tracks.id = album_tracks.track_id
           WHERE album_tracks.album_id = albums.id
             AND tracks.missing = 0
-        ), '') AS search_blob
+        ), '')` : "''"} AS search_blob
       FROM albums
       ${localPlaybackJoin}
       WHERE EXISTS (
@@ -6897,7 +6933,7 @@ export class LibraryStore {
         FROM album_tracks
         INNER JOIN tracks ON tracks.id = album_tracks.track_id
         WHERE album_tracks.album_id = albums.id
-          AND tracks.missing = 0
+          AND tracks.missing = 0${localScopeSql}
       )
     ),
     remote_albums AS (
@@ -6920,7 +6956,7 @@ export class LibraryStore {
         MAX(sort_mtime_ms) AS sort_mtime_ms,
         COALESCE(SUM(playback_play_count), 0) AS playback_play_count,
         MAX(last_played_at) AS last_played_at,
-        GROUP_CONCAT(COALESCE(search_terms, '') || ' ' || title || ' ' || artist || ' ' || album_artist || ' ' || COALESCE(genre, '') || ' ' || remote_path, ' ') AS search_blob
+        ${scope.searchActive !== false ? `GROUP_CONCAT(COALESCE(search_terms, '') || ' ' || title || ' ' || artist || ' ' || album_artist || ' ' || COALESCE(genre, '') || ' ' || remote_path, ' ')` : "''"} AS search_blob
       FROM remote_album_rows
       GROUP BY album_id, source_id, provider
     ),
@@ -7032,10 +7068,16 @@ export class LibraryStore {
     return `'remote-artist:' || lower(hex(${tableName}.source_id || char(31) || echo_artist_merge_key(COALESCE(NULLIF(TRIM(${tableName}.artist), ''), 'Unknown Artist'))))`;
   }
 
-  private unifiedArtistsSql(): string {
+  private unifiedArtistsSql(scope: { mediaType?: 'local' | 'remote' | null; sourceId?: string | null; folderOnly?: boolean; includeListening?: boolean } = {}): string {
     const remoteAlbumIdentity = this.remoteAlbumIdentitySql('remote_tracks');
 
-    return `WITH remote_artist_rows AS (
+    const listeningSql = scope.includeListening ? `local_artist_listening AS (
+      SELECT artist_tracks.artist_id, SUM(COALESCE(tracks.play_count, 0)) AS play_count,
+        MAX(tracks.last_played_at) AS last_played_at, MAX(tracks.created_at) AS added_at
+      FROM artist_tracks INNER JOIN tracks ON tracks.id = artist_tracks.track_id
+      WHERE tracks.missing = 0 GROUP BY artist_tracks.artist_id
+    ),` : '';
+    return `WITH ${listeningSql} remote_artist_rows AS (
       SELECT
         remote_tracks.*,
         remote_sources.display_name AS source_display_name,
@@ -7046,7 +7088,7 @@ export class LibraryStore {
       FROM remote_tracks
       INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id
       WHERE remote_tracks.availability != 'missing'
-        AND remote_sources.status = 'enabled'
+        AND remote_sources.status = 'enabled'${scope.mediaType === 'local' || scope.folderOnly ? ' AND 0 = 1' : ''}${scope.sourceId ? ' AND remote_tracks.source_id = ?' : ''}
     ),
     local_artists AS (
       SELECT
@@ -7062,6 +7104,9 @@ export class LibraryStore {
         artists.track_count,
         artists.album_count,
         artists.cover_id,
+        ${scope.includeListening ? 'COALESCE(local_artist_listening.play_count, 0)' : '0'} AS listening_play_count,
+        ${scope.includeListening ? 'local_artist_listening.last_played_at' : 'NULL'} AS listening_last_played_at,
+        ${scope.includeListening ? 'local_artist_listening.added_at' : 'NULL'} AS listening_added_at,
         covers.source_type AS cover_source,
         artist_image_cache.status AS avatar_status,
         artist_image_cache.provider AS avatar_provider,
@@ -7070,8 +7115,10 @@ export class LibraryStore {
         artist_image_cache.medium_path AS avatar_medium_path,
         artist_image_cache.large_path AS avatar_large_path
       FROM artists
+      ${scope.includeListening ? 'LEFT JOIN local_artist_listening ON local_artist_listening.artist_id = artists.id' : ''}
       LEFT JOIN covers ON covers.id = artists.cover_id
       LEFT JOIN artist_image_cache ON artist_image_cache.artist_key = artists.artist_key
+      ${scope.mediaType === 'remote' || scope.sourceId ? 'WHERE 0 = 1' : ''}
     ),
     remote_artists AS (
       SELECT
@@ -7087,6 +7134,9 @@ export class LibraryStore {
         COUNT(*) AS track_count,
         COUNT(DISTINCT remote_artist_rows.album_id) AS album_count,
         MIN(remote_artist_rows.cover_id) AS cover_id,
+        0 AS listening_play_count,
+        NULL AS listening_last_played_at,
+        MAX(remote_artist_rows.created_at) AS listening_added_at,
         NULL AS cover_source,
         artist_image_cache.status AS avatar_status,
         artist_image_cache.provider AS avatar_provider,
@@ -7105,16 +7155,6 @@ export class LibraryStore {
     )`;
   }
 
-  private artistListeningAggregateSql(selectSql: string): string {
-    return `(
-          SELECT ${selectSql}
-          FROM artist_tracks
-          INNER JOIN tracks ON tracks.id = artist_tracks.track_id
-          WHERE artist_tracks.artist_id = library_artists.id
-            AND tracks.missing = 0
-        )`;
-  }
-
   private artistAvatarPriorityOrderSql(): string {
     return `CASE
       WHEN avatar_status = 'matched'
@@ -7130,9 +7170,9 @@ export class LibraryStore {
     const prioritySql = prioritizeArtistAvatars ? `${this.artistAvatarPriorityOrderSql()}, ` : '';
     const nameAsc = 'echo_library_sort_key(name) COLLATE NOCASE, name COLLATE NOCASE';
     const nameDesc = 'echo_library_sort_key(name) COLLATE NOCASE DESC, name COLLATE NOCASE DESC';
-    const addedAt = this.artistListeningAggregateSql('MAX(tracks.created_at)');
-    const lastPlayedAt = this.artistListeningAggregateSql('MAX(tracks.last_played_at)');
-    const playCount = `COALESCE(${this.artistListeningAggregateSql('SUM(COALESCE(tracks.play_count, 0))')}, 0)`;
+    const addedAt = 'listening_added_at';
+    const lastPlayedAt = 'listening_last_played_at';
+    const playCount = 'listening_play_count';
 
     switch (sort) {
       case 'frequent':
@@ -7224,16 +7264,23 @@ export class LibraryStore {
       likePredicate('library_artists.name'),
       likePredicate('COALESCE(library_artists.sort_name, \'\')'),
     ], searchOptions);
-    const whereParts = [
+    const folderIds = Array.from(new Set(query?.folderIds ?? [])).slice(0, 128);
+    const folderSql = folderIds.length ? `library_artists.media_type = 'local' AND library_artists.id IN (
+      SELECT artist_tracks.artist_id FROM artist_tracks INNER JOIN tracks ON tracks.id = artist_tracks.track_id
+      WHERE tracks.missing = 0 AND tracks.folder_id IN (${folderIds.map(() => '?').join(', ')})
+    )` : '';
+    const whereParts = [folderSql,
       searchFilter.sql,
       mediaTypeFilter ? 'library_artists.media_type = ?' : '',
       sourceId ? 'library_artists.source_id = ?' : '',
     ].filter(Boolean);
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
-    const whereParams = [...searchFilter.params, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : [])];
-    const orderSql = this.unifiedArtistOrderSql(sort, query?.prioritizeArtistAvatars === true);
-    const artistsSql = this.unifiedArtistsSql();
-    const totalRow = this.getRow(`${artistsSql} SELECT COUNT(*) AS total FROM library_artists ${whereSql}`, ...whereParams);
+    const whereParams = [...folderIds, ...searchFilter.params, ...(mediaTypeFilter ? [mediaTypeFilter] : []), ...(sourceId ? [sourceId] : [])];
+    const orderSql = this.unifiedArtistOrderSql(sort, query?.prioritizeArtistAvatars === true) + (sort === 'random' ? '' : ', id ASC');
+    const scope = { mediaType: mediaTypeFilter, sourceId, folderOnly: folderIds.length > 0 };
+    const countArtistsSql = this.unifiedArtistsSql(scope);
+    const artistsSql = this.unifiedArtistsSql({ ...scope, includeListening: ['lastPlayed', 'playCountAsc', 'playCountDesc', 'recent', 'createdAsc', 'createdDesc'].includes(sort) });
+    const total = this.countCache.read(`${countArtistsSql} SELECT COUNT(*) AS total FROM library_artists ${whereSql}`, [...(sourceId ? [sourceId] : []), ...whereParams], JSON.stringify(searchOptions));
     const rows = this.allRows(
       `${artistsSql}
       SELECT
@@ -7244,12 +7291,10 @@ export class LibraryStore {
        ${whereSql}
        ${orderSql}
        LIMIT ? OFFSET ?`,
-      ...whereParams,
+      ...(sourceId ? [sourceId] : []), ...whereParams,
       pageSize,
       offset,
     );
-    const total = Number(totalRow?.total ?? 0);
-
     return {
       items: rows.map((row) => this.mapArtist(row)),
       page,
@@ -9925,8 +9970,12 @@ export class LibraryStore {
     switch (sort) {
       case 'artist':
         return 'ORDER BY tracks.artist COLLATE NOCASE, tracks.title COLLATE NOCASE';
+      case 'artistDesc':
+        return 'ORDER BY tracks.artist COLLATE NOCASE DESC, tracks.title COLLATE NOCASE, tracks.id';
       case 'artistAlbum':
         return 'ORDER BY tracks.artist COLLATE NOCASE, tracks.album COLLATE NOCASE, COALESCE(tracks.disc_no, 0), COALESCE(tracks.track_no, 999999), tracks.title COLLATE NOCASE';
+      case 'albumDesc':
+        return 'ORDER BY tracks.album COLLATE NOCASE DESC, COALESCE(tracks.disc_no, 0), COALESCE(tracks.track_no, 999999), tracks.title COLLATE NOCASE, tracks.id';
       case 'album':
         return 'ORDER BY tracks.album COLLATE NOCASE, tracks.title COLLATE NOCASE';
       case 'recent':
@@ -9987,14 +10036,6 @@ export class LibraryStore {
       default:
         return 'ORDER BY tracks.title COLLATE NOCASE, tracks.artist COLLATE NOCASE';
     }
-  }
-
-  private unifiedTrackOrderSql(sort: string, searchActive = false): string {
-    if (searchActive && (sort === 'default' || !sort)) {
-      return 'ORDER BY search_rank ASC, title COLLATE NOCASE, artist COLLATE NOCASE';
-    }
-
-    return this.trackOrderSql(sort).replace(/\btracks\./g, '');
   }
 
   private playlistItemsOrderSql(sort: string): string {
@@ -10524,11 +10565,11 @@ export class LibraryStore {
   }
 
   private getRow(sql: string, ...params: unknown[]): DbRow | null {
-    return this.database.prepare<unknown[], DbRow>(sql).get(...params) ?? null;
+    return libraryReadStatement(this.database, sql).get(...params) ?? null;
   }
 
   private allRows(sql: string, ...params: unknown[]): DbRow[] {
-    return this.database.prepare<unknown[], DbRow>(sql).all(...params);
+    return libraryReadStatement(this.database, sql).all(...params);
   }
 
   private createDuplicateTrackService(): DuplicateTrackService {

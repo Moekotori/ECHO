@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, net } from 'electron';
-import sharp from 'sharp';
+import sharp from '../images/sharpRuntime';
 import { readResponseBodyLimited } from '../network/readResponseBodyLimited';
 import type { PlaybackOrderMode } from '../../shared/types/playback';
 

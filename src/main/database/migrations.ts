@@ -1,5 +1,6 @@
 import type { EchoDatabase } from './createDatabase';
 import { librarySchemaSql, schemaMigrationTableSql } from './schema';
+import { createLibraryFilterIndexes } from './libraryFilterIndexes';
 
 type Migration = {
   id: number;
@@ -1364,6 +1365,10 @@ export const migrations: Migration[] = [
           ON audio_transition_analysis(status, updated_at);
       `);
     },
+  },
+  {
+    id: 48,
+    apply: createLibraryFilterIndexes,
   },
 ];
 

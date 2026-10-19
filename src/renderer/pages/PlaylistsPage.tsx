@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, Check, ChevronDown, Download, ExternalLink, FilePlus2, GripVertical, Heart, ImagePlus, Link, ListPlus, Loader2, MoreHorizontal, Music2, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Upload, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, ChevronDown, Download, ExternalLink, FilePlus2, GripVertical, Heart, ImagePlus, Link, ListPlus, Loader2, MoreHorizontal, Music2, Pencil, Play, Plus, RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { DownloadJob, DownloadJobStatus } from '../../shared/types/downloads';
@@ -22,7 +22,9 @@ import { getMouseSideButtonDirection, shouldIgnoreMouseSideButtonTarget } from '
 import { openAlbumDetailForTrack } from '../utils/albumNavigation';
 import { openArtistDetailForTrack } from '../utils/artistNavigation';
 import { requestStreamingAlbumDetailNavigation, requestStreamingArtistDetailNavigation } from '../utils/streamingDetailNavigation';
+import { PlaylistWallCover } from './playlists/PlaylistWallCover';
 import '../styles/playlists-cinematic.css';
+import '../styles/playlists-wall.css';
 
 const pageSize = 100;
 const playlistSortOptions: Array<{ value: PlaylistSortMode; label: string }> = [
@@ -452,6 +454,7 @@ const playlistTrackMenuActions: readonly TrackMenuAction[] = [
   'show-in-folder',
   'copy-path',
   'open-system',
+  'preview-cover',
 ];
 
 const emptyItemsPage = (): LibraryPage<LibraryPlaylistItem> => ({
@@ -564,6 +567,8 @@ const favoriteToTrack = (item: StreamingFavoriteTrack, streamingQuality: Streami
 
 export const PlaylistsPage = (): JSX.Element => {
   const { t } = useI18n();
+  const streamingAvailable = getStreamingBridge() !== null;
+  const [detailOpen, setDetailOpen] = useState(false);
   const [playlistPanelView, setPlaylistPanelView] = useState<'local' | 'streamingFavorites'>('local');
   const [playlistSourceFilter, setPlaylistSourceFilter] = useState<PlaylistSourceFilter>('all');
   const [playlists, setPlaylists] = useState<LibraryPlaylist[]>([]);
@@ -594,6 +599,7 @@ export const PlaylistsPage = (): JSX.Element => {
   const [isGeneratingSmartPlaylist, setIsGeneratingSmartPlaylist] = useState(false);
   const [downloadsFeatureUnlocked, setDownloadsFeatureUnlocked] = useState(false);
   const [streamingPlaylistImportNoticeAccepted, setStreamingPlaylistImportNoticeAccepted] = useState(false);
+  const [pendingStreamingAction, setPendingStreamingAction] = useState<'favorites' | 'daily' | null>(null);
   const [streamingPlaylistNoticeOpen, setStreamingPlaylistNoticeOpen] = useState(false);
   const [streamingPlaylistNoticeConsent, setStreamingPlaylistNoticeConsent] = useState('');
   const [pendingAccountPlaylistSyncProvider, setPendingAccountPlaylistSyncProvider] = useState<AccountPlaylistSyncProvider | null>(null);
@@ -840,13 +846,16 @@ export const PlaylistsPage = (): JSX.Element => {
     }
 
     try {
-      const result = await library.getPlaylists();
+      // Preserve historical imports in storage without exposing unavailable providers.
+      const result = (await library.getPlaylists()).filter((playlist) =>
+        streamingAvailable || playlist.sourceProvider === 'local' || playlist.sourceProvider === 'remote' || playlist.sourceProvider === 'm3u8',
+      );
       setPlaylists(result);
       setSelectedPlaylistId((current) => current ?? orderPlaylists(result, readPlaylistListOrderMemory())[0]?.id ?? null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     }
-  }, []);
+  }, [streamingAvailable]);
 
   const loadItems = useCallback(async (playlistId: string, nextPage = 1, mode: 'replace' | 'append' = 'replace', searchText = playlistSearch): Promise<void> => {
     const library = window.echo?.library;
@@ -987,6 +996,9 @@ export const PlaylistsPage = (): JSX.Element => {
 
   useEffect(() => {
     const streaming = getStreamingBridge();
+    if (!streaming) {
+      return;
+    }
     const refreshFavorites = (): void => {
       void streaming?.getFavorites?.()
         .then((snapshot) => setStreamingFavorites(snapshot))
@@ -1020,6 +1032,8 @@ export const PlaylistsPage = (): JSX.Element => {
     if (selectedPlaylist) {
       void loadItems(selectedPlaylist.id);
     } else {
+      requestIdRef.current += 1;
+      setIsLoading(false);
       setItemsPage(emptyItemsPage());
     }
   }, [loadItems, selectedPlaylist]);
@@ -1225,6 +1239,7 @@ export const PlaylistsPage = (): JSX.Element => {
       const result = await streaming.importPlaylistFromUrl(playlistUrl);
       await loadPlaylists();
       setSelectedPlaylistId(result.playlistId);
+      setDetailOpen(true);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
       await loadItems(result.playlistId, 1, 'replace', '');
@@ -1238,7 +1253,13 @@ export const PlaylistsPage = (): JSX.Element => {
     }
   };
 
-  const handleRefreshNeteaseDailyRecommend = async (): Promise<void> => {
+  const handleRefreshNeteaseDailyRecommend = async (consentAccepted = false): Promise<void> => {
+    if (!streamingPlaylistImportNoticeAccepted && !consentAccepted) {
+      setPendingStreamingAction('daily');
+      setStreamingPlaylistNoticeConsent('');
+      setStreamingPlaylistNoticeOpen(true);
+      return;
+    }
     const streaming = window.echo?.streaming;
     if (!streaming?.refreshNeteaseDailyRecommend) {
       setError(t('playlistsPage.error.desktopBridgeDailyRecommend'));
@@ -1251,7 +1272,10 @@ export const PlaylistsPage = (): JSX.Element => {
     try {
       const result = await streaming.refreshNeteaseDailyRecommend();
       await loadPlaylists();
+      setPlaylistPanelView('local');
+      setPlaylistSourceFilter('all');
       setSelectedPlaylistId(result.playlistId);
+      setDetailOpen(true);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
       await loadItems(result.playlistId, 1, 'replace', '');
@@ -1390,10 +1414,13 @@ export const PlaylistsPage = (): JSX.Element => {
 
     try {
       const playlist = await library.createPlaylist({ name });
+      setPlaylistPanelView('local');
+      setPlaylistSourceFilter('all');
       await loadPlaylists();
       setSelectedPlaylistId(playlist.id);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
+      setDetailOpen(true);
       setNewPlaylistName('');
       setShowNewPlaylistForm(false);
       setStatusMessage(t('playlistsPage.status.createdLocal'));
@@ -1417,7 +1444,10 @@ export const PlaylistsPage = (): JSX.Element => {
     try {
       const result = await library.createSmartPlaylist({ limit: 30, recentDays: 180 });
       await loadPlaylists();
+      setPlaylistPanelView('local');
+      setPlaylistSourceFilter('all');
       setSelectedPlaylistId(result.playlist.id);
+      setDetailOpen(true);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
       await loadItems(result.playlist.id, 1, 'replace', '');
@@ -1870,7 +1900,10 @@ export const PlaylistsPage = (): JSX.Element => {
       const result = await streaming.importPlaylistFromUrl(url);
       setPlaylistUrl('');
       await loadPlaylists();
+      setPlaylistPanelView('local');
+      setPlaylistSourceFilter('all');
       setSelectedPlaylistId(result.playlistId);
+      setDetailOpen(true);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
       await loadItems(result.playlistId, 1, 'replace', '');
@@ -1908,15 +1941,33 @@ export const PlaylistsPage = (): JSX.Element => {
     setStreamingPlaylistNoticeOpen(false);
     setStreamingPlaylistNoticeConsent('');
     setPendingAccountPlaylistSyncProvider(null);
+    setPendingStreamingAction(null);
   };
 
   const handleStreamingPlaylistNoticeConfirm = async (): Promise<void> => {
+    if (streamingPlaylistNoticeConsent.trim() !== t('streamingConsentNotice.consentPhrase')) return;
     const url = playlistUrl.trim();
     setStreamingPlaylistNoticeOpen(false);
     setStreamingPlaylistNoticeConsent('');
-    setStreamingPlaylistImportNoticeAccepted(true);
+    try {
+      if (!window.echo?.app?.setSettings) throw new Error('无法保存条款确认，请重试。');
+      const saved = await window.echo.app.setSettings({ streamingPlaylistImportNoticeAccepted: true });
+      if (saved.streamingPlaylistImportNoticeAccepted !== true) throw new Error('无法保存条款确认，请重试。');
+      setStreamingPlaylistImportNoticeAccepted(true);
+    } catch (consentError) {
+      setError(consentError instanceof Error ? consentError.message : String(consentError));
+      setPendingAccountPlaylistSyncProvider(null);
+      setPendingStreamingAction(null);
+      return;
+    }
 
-    await window.echo?.app?.setSettings?.({ streamingPlaylistImportNoticeAccepted: true }).catch(() => undefined);
+    if (pendingStreamingAction) {
+      const action = pendingStreamingAction;
+      setPendingStreamingAction(null);
+      if (action === 'favorites') await handleImportStreamingFavorites(true);
+      else await handleRefreshNeteaseDailyRecommend(true);
+      return;
+    }
 
     if (pendingAccountPlaylistSyncProvider) {
       const provider = pendingAccountPlaylistSyncProvider;
@@ -1930,7 +1981,13 @@ export const PlaylistsPage = (): JSX.Element => {
     }
   };
 
-  const handleImportStreamingFavorites = async (): Promise<void> => {
+  const handleImportStreamingFavorites = async (consentAccepted = false): Promise<void> => {
+    if (!streamingPlaylistImportNoticeAccepted && !consentAccepted) {
+      setPendingStreamingAction('favorites');
+      setStreamingPlaylistNoticeConsent('');
+      setStreamingPlaylistNoticeOpen(true);
+      return;
+    }
     const streaming = window.echo?.streaming;
     const url = favoriteImportUrl.trim();
     if (!streaming?.importFavoritesFromUrl || !url) {
@@ -1945,6 +2002,7 @@ export const PlaylistsPage = (): JSX.Element => {
       setFavoriteImportUrl('');
       setStreamingFavorites(result.snapshot);
       setSelectedFavoriteListId(favoriteCollectionSelectionId(result.collectionId));
+      setDetailOpen(true);
       setStatusMessage(`已导入收藏表：${result.playlistName}，新增 ${result.addedCount} / 读取 ${result.importedCount} 首`);
       window.dispatchEvent(new CustomEvent('streaming:favorites-changed', { detail: result.snapshot }));
     } catch (importError) {
@@ -2179,7 +2237,10 @@ export const PlaylistsPage = (): JSX.Element => {
       }
 
       await loadPlaylists();
+      setPlaylistPanelView('local');
+      setPlaylistSourceFilter('all');
       setSelectedPlaylistId(result.playlistId);
+      setDetailOpen(true);
       setPlaylistSearchInput('');
       setPlaylistSearch('');
       await loadItems(result.playlistId, 1, 'replace', '');
@@ -2940,7 +3001,7 @@ export const PlaylistsPage = (): JSX.Element => {
   const canSyncSelectedAccountProvider = selectedAccountSyncProvider !== null && syncingAccountPlaylistProvider === null;
 
   return (
-    <div className="playlists-page">
+    <div className="playlists-page" data-view={detailOpen ? 'detail' : 'wall'}>
       <aside className="playlist-sidebar" aria-label={t('route.playlists.label')}>
         <div className="playlist-sidebar-header">
           <h1>{t('route.playlists.label')}</h1>
@@ -2986,7 +3047,7 @@ export const PlaylistsPage = (): JSX.Element => {
           </form>
         ) : null}
 
-        <div className="playlist-view-switch" role="tablist" aria-label={t('playlistsPage.view.aria')}>
+        {streamingAvailable ? <div className="playlist-view-switch" role="tablist" aria-label={t('playlistsPage.view.aria')}>
           <button type="button" role="tab" aria-selected={playlistPanelView === 'local'} data-active={playlistPanelView === 'local'} onClick={() => setPlaylistPanelView('local')}>
             {playlistPanelView === 'local' ? <motion.span className="playlist-switch-indicator" layoutId="playlist-view-switch-indicator" transition={springFast} /> : null}
             <span className="playlist-switch-label">{t('playlistsPage.view.local')}</span>
@@ -2995,8 +3056,11 @@ export const PlaylistsPage = (): JSX.Element => {
             {playlistPanelView === 'streamingFavorites' ? <motion.span className="playlist-switch-indicator" layoutId="playlist-view-switch-indicator" transition={springFast} /> : null}
             <span className="playlist-switch-label">{t('playlistsPage.view.streamingFavorites')}</span>
           </button>
-        </div>
+        </div> : null}
 
+        {!detailOpen && (error || statusMessage) ? <div className="playlist-wall-status" role={error ? 'alert' : 'status'}>{error ?? statusMessage}
+          {spotifyPlaylistHelpUrl ? <button className="text-action" type="button" onClick={() => void handleOpenSpotifyPlaylistForCopy()}><ExternalLink size={13} />打开 Spotify 复制歌单</button> : null}
+        </div> : null}
         <AnimatePresence mode="wait" initial={false}>
           {playlistPanelView === 'local' ? (
             <motion.div
@@ -3008,7 +3072,7 @@ export const PlaylistsPage = (): JSX.Element => {
               transition={panelTransition}
               variants={panelVariants}
             >
-            <button
+            {streamingAvailable ? <button
               className="playlist-daily-recommend"
               type="button"
               disabled={isRefreshingStreamingPlaylist}
@@ -3019,7 +3083,7 @@ export const PlaylistsPage = (): JSX.Element => {
                 <strong>{t('playlistsPage.daily.title')}</strong>
                 <small>{t('playlistsPage.daily.subtitle')}</small>
               </span>
-            </button>
+            </button> : null}
 
             <button
               className="playlist-smart-generate"
@@ -3041,7 +3105,7 @@ export const PlaylistsPage = (): JSX.Element => {
               </div>
             ) : null}
 
-            <div className="playlist-source-controls">
+            {streamingAvailable ? <div className="playlist-source-controls">
               <div className="playlist-source-filter" ref={sourceFilterMenuRef}>
                 <button
                   type="button"
@@ -3081,54 +3145,9 @@ export const PlaylistsPage = (): JSX.Element => {
                 {syncingAccountPlaylistProvider ? <Loader2 className="spinning-icon" size={14} /> : <RefreshCw size={14} />}
                 <span>{syncingAccountPlaylistProvider ? '同步中' : '同步'}</span>
               </button>
-            </div>
+            </div> : null}
 
-            <div className="playlist-list">
-              {filteredOrderedPlaylists.map((playlist) => {
-                const sourceLabel = playlistSourceProviderLabel(playlist);
-
-                return (
-                  <motion.button
-                    animate={{ opacity: 1, y: 0 }}
-                    className="playlist-list-item"
-                    data-active={playlist.id === selectedPlaylist?.id ? 'true' : undefined}
-                    data-dragging={draggedPlaylistId === playlist.id ? 'true' : undefined}
-                    data-drop-target={dropTargetPlaylistId === playlist.id ? 'true' : undefined}
-                    data-reorderable={canReorderPlaylistList ? 'true' : undefined}
-                    draggable={canReorderPlaylistList}
-                    initial={{ opacity: 0, y: 6 }}
-                    key={playlist.id}
-                    layout
-                    transition={panelTransition}
-                    type="button"
-                    onDragEnd={() => handlePlaylistListDragEnd()}
-                    onDragOver={(event) => handlePlaylistListDragOver(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
-                    onDragStart={(event) => handlePlaylistListDragStart(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
-                    onDrop={(event) => handlePlaylistListDrop(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
-                    onClick={() => setSelectedPlaylistId(playlist.id)}
-                    onContextMenu={(event) => handlePlaylistContextMenu(event, playlist)}
-                  >
-                    <GripVertical className="playlist-list-drag-handle" size={15} aria-hidden="true" />
-                    <span>
-                      <strong>
-                        <span>{playlist.name}</span>
-                        {sourceLabel ? <em>{sourceLabel}</em> : null}
-                      </strong>
-                      <small>{t('albumMenu.playlistSubmenu.itemCount', { count: playlist.itemCount })}</small>
-                    </span>
-                  </motion.button>
-                );
-              })}
-              {filteredOrderedPlaylists.length === 0 ? (
-                <p className="playlist-empty">
-                  {playlistSourceFilter === 'streaming'
-                    ? '还没有流媒体歌单。'
-                    : t('playlistsPage.empty.local')}
-                </p>
-              ) : null}
-            </div>
-
-            <form
+            {streamingAvailable ? <form
               className="streaming-section playlist-import-box"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -3152,23 +3171,57 @@ export const PlaylistsPage = (): JSX.Element => {
                 {isImportingPlaylist ? <Loader2 className="spinning-icon" size={15} /> : <Plus size={15} />}
                 <span>{isImportingPlaylist ? t('playlistsPage.importStreaming.adding') : t('playlistsPage.importStreaming.add')}</span>
               </button>
-            </form>
+            </form> : null}
 
-            <div className="streaming-section">
-              <h2>流媒体歌单</h2>
-              <div>
-                <span><WifiOff size={14} /> 网易云音乐</span>
-                <em>未连接</em>
-              </div>
-              <div>
-                <span><WifiOff size={14} /> QQ 音乐</span>
-                <em>未连接</em>
-              </div>
-              <div>
-                <span><WifiOff size={14} /> Spotify</span>
-                <em>需登录</em>
-              </div>
+            <div className="playlist-list">
+              {filteredOrderedPlaylists.map((playlist) => {
+                const sourceLabel = playlistSourceProviderLabel(playlist);
+
+                return (
+                  <motion.button
+                    animate={{ opacity: 1, y: 0 }}
+                    className="playlist-list-item"
+                    data-active={playlist.id === selectedPlaylist?.id ? 'true' : undefined}
+                    data-dragging={draggedPlaylistId === playlist.id ? 'true' : undefined}
+                    data-drop-target={dropTargetPlaylistId === playlist.id ? 'true' : undefined}
+                    data-reorderable={canReorderPlaylistList ? 'true' : undefined}
+                    draggable={canReorderPlaylistList}
+                    initial={{ opacity: 0, y: 6 }}
+                    key={playlist.id}
+                    layout
+                    transition={panelTransition}
+                    type="button"
+                    onDragEnd={() => handlePlaylistListDragEnd()}
+                    onDragOver={(event) => handlePlaylistListDragOver(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
+                    onDragStart={(event) => handlePlaylistListDragStart(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
+                    onDrop={(event) => handlePlaylistListDrop(event as unknown as DragEvent<HTMLButtonElement>, playlist)}
+                    onClick={() => { setSelectedPlaylistId(playlist.id); setDetailOpen(true); }}
+                    onContextMenu={(event) => handlePlaylistContextMenu(event, playlist)}
+                  >
+                    <PlaylistWallCover playlist={playlist} />
+                    <GripVertical className="playlist-list-drag-handle" size={15} aria-hidden="true" />
+                    <span className="playlist-wall-copy">
+                      <strong>
+                        <span>{playlist.name}</span>
+                        {sourceLabel ? <em>{sourceLabel}</em> : null}
+                      </strong>
+                      <small>{t('albumMenu.playlistSubmenu.itemCount', { count: playlist.itemCount })}</small>
+                    </span>
+                  </motion.button>
+                );
+              })}
+              {filteredOrderedPlaylists.length === 0 ? (
+                <p className="playlist-empty">
+                  {playlistSourceFilter === 'streaming'
+                    ? '还没有流媒体歌单。'
+                    : t('playlistsPage.empty.local')}
+                </p>
+              ) : null}
             </div>
+
+
+
+
             </motion.div>
           ) : (
             <motion.div
@@ -3223,10 +3276,11 @@ export const PlaylistsPage = (): JSX.Element => {
                     onDragOver={(event) => handleFavoriteListDragOver(event as unknown as DragEvent<HTMLButtonElement>, entry)}
                     onDragStart={(event) => handleFavoriteListDragStart(event as unknown as DragEvent<HTMLButtonElement>, entry)}
                     onDrop={(event) => handleFavoriteListDrop(event as unknown as DragEvent<HTMLButtonElement>, entry)}
-                    onClick={() => setSelectedFavoriteListId(entry.id)}
+                    onClick={() => { setSelectedFavoriteListId(entry.id); setDetailOpen(true); }}
                   >
+                    <PlaylistWallCover playlist={{ coverThumb: (entry.type === 'collection' ? entry.collection.tracks : streamingFavorites.providers[entry.provider]).find((track) => track.coverThumb)?.coverThumb ?? null }} />
                     <GripVertical className="playlist-list-drag-handle" size={15} aria-hidden="true" />
-                    <span>
+                    <span className="playlist-wall-copy">
                       <strong>
                         <span>{entry.type === 'provider' ? entry.label : entry.collection.name}</span>
                         {entry.type === 'collection' ? <em>{entry.providerLabel}</em> : null}
@@ -3243,6 +3297,7 @@ export const PlaylistsPage = (): JSX.Element => {
       </aside>
 
       <section className="playlist-detail">
+        <button className="secondary-action playlist-wall-back" type="button" onClick={() => setDetailOpen(false)}><ArrowLeft size={16} />返回歌单墙</button>
         <>
           {playlistPanelView === 'streamingFavorites' ? (
             <motion.div
@@ -3429,7 +3484,7 @@ export const PlaylistsPage = (): JSX.Element => {
                     </button>
                   ) : null}
                 </form>
-                {isSelectedPlaylistRemote ? (
+                {streamingAvailable && isSelectedPlaylistRemote ? (
                   <div className="playlist-quality-control" ref={qualityMenuRef} title="Streaming quality">
                     <SlidersHorizontal size={15} />
                     <span>音质</span>
@@ -3496,7 +3551,7 @@ export const PlaylistsPage = (): JSX.Element => {
                   <ImagePlus size={16} />
                   <span>更换封面</span>
                 </button>
-                {selectedStreamingPlaylistUrl || isSelectedPlaylistNeteaseDailyRecommend ? (
+                {streamingAvailable && (selectedStreamingPlaylistUrl || isSelectedPlaylistNeteaseDailyRecommend) ? (
                   <button
                     className="secondary-action"
                     type="button"
@@ -3650,7 +3705,7 @@ export const PlaylistsPage = (): JSX.Element => {
           )}
         </>
 
-        {error || statusMessage || isLoading ? (
+        {detailOpen && (error || statusMessage || isLoading) ? (
           <div className="list-footer">
             <span>{error ?? statusMessage ?? t('playlistsPage.status.loading')}</span>
             {spotifyPlaylistHelpUrl ? (

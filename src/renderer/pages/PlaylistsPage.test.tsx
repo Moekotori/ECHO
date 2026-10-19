@@ -293,6 +293,99 @@ afterEach(() => {
 });
 
 describe('PlaylistsPage detail links', () => {
+  it('opens a playlist from the cover wall and returns to the wall', async () => {
+    window.echo = {
+      library: { getPlaylists: vi.fn().mockResolvedValue([playlist()]), getPlaylistItems: vi.fn().mockResolvedValue(page([item()])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
+      playback: { getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }) },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    const card = await screen.findByRole('button', { name: /Road Mix/ });
+    expect(document.querySelector('.playlists-page')?.getAttribute('data-view')).toBe('wall');
+    expect(card.querySelector('.playlist-wall-cover')).toBeTruthy();
+    fireEvent.click(card);
+    expect(document.querySelector('.playlists-page')?.getAttribute('data-view')).toBe('detail');
+    fireEvent.click(screen.getByRole('button', { name: '返回歌单墙' }));
+    expect(document.querySelector('.playlists-page')?.getAttribute('data-view')).toBe('wall');
+  });
+
+  it('opens a newly created local playlist when starting from streaming favorites', async () => {
+    const created = playlist({ id: 'new-local', name: 'New Local' });
+    const getPlaylists = vi.fn().mockResolvedValue([playlist()]);
+    const createPlaylist = vi.fn(async () => { getPlaylists.mockResolvedValue([playlist(), created]); return created; });
+    window.echo = {
+      library: { getPlaylists, createPlaylist, getPlaylistItems: vi.fn().mockResolvedValue(page([])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
+      streaming: { getFavorites: vi.fn().mockResolvedValue(streamingFavoritesSnapshot()) },
+      playback: { getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }) },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    fireEvent.click(await screen.findByRole('tab', { name: '流媒体收藏' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建本地歌单' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '本地歌单名称' }), { target: { value: 'New Local' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建' }));
+    expect(await screen.findByRole('heading', { name: 'New Local' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '本地歌单' }).getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector('.playlists-page')?.getAttribute('data-view')).toBe('detail');
+  });
+
+  it.each(['rejected', 'not-saved'] as const)('keeps playlist import blocked when consent is %s', async (failure) => {
+    const setSettings = failure === 'rejected' ? vi.fn().mockRejectedValue(new Error('保存失败')) : vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: false });
+    const importPlaylistFromUrl = vi.fn();
+    window.echo = {
+      app: { getSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: false }), setSettings },
+      library: { getPlaylists: vi.fn().mockResolvedValue([playlist()]), getPlaylistItems: vi.fn().mockResolvedValue(page([])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
+      streaming: { importPlaylistFromUrl },
+      playback: { getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }) },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    const input = await screen.findByPlaceholderText('粘贴网易云 / QQ 音乐 / Spotify 歌单链接');
+    fireEvent.change(input, { target: { value: 'https://music.163.com/playlist?id=1' } });
+    fireEvent.submit(input.closest('form')!);
+    const dialog = await screen.findByRole('dialog', { name: '流媒体功能须知' });
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '我同意' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '我同意并继续' }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(importPlaylistFromUrl).not.toHaveBeenCalled();
+    fireEvent.submit(input.closest('form')!);
+    expect(await screen.findByRole('dialog', { name: '流媒体功能须知' })).toBeTruthy();
+  });
+
+  it('hides removed streaming entry points and historical provider playlists when the bridge is absent', async () => {
+    const localPlaylist = playlist();
+    const remotePlaylist = playlist({ id: 'remote-files', name: 'Remote files', sourceProvider: 'remote' });
+    const oldImports = (['netease', 'qqmusic', 'kugou', 'spotify'] as const).map((sourceProvider) =>
+      playlist({ id: sourceProvider, name: `Old ${sourceProvider} import`, sourceProvider }),
+    );
+    const getPlaylistItems = vi.fn().mockResolvedValue(page([item()]));
+    window.localStorage.setItem('echo-next.playlist-list-order.v1', JSON.stringify({ orderedIds: ['netease'] }));
+    window.echo = {
+      library: {
+        getPlaylists: vi.fn().mockResolvedValue([...oldImports, localPlaylist, remotePlaylist]),
+        getPlaylistItems,
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+      playback: {
+        getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }),
+      },
+    } as unknown as Window['echo'];
+
+    renderPlaylistsPage();
+
+    await screen.findByRole('button', { name: 'Song One' });
+    expect(screen.queryByRole('tab', { name: '流媒体收藏' })).toBeNull();
+    expect(screen.queryByText('每日推荐')).toBeNull();
+    expect(screen.queryByText('添加流媒体歌单')).toBeNull();
+    expect(screen.queryByText('流媒体歌单')).toBeNull();
+    expect(screen.queryByRole('button', { name: '同步' })).toBeNull();
+    expect(screen.queryByPlaceholderText(/粘贴网易云/)).toBeNull();
+    for (const oldImport of oldImports) {
+      expect(screen.queryByText(oldImport.name)).toBeNull();
+    }
+    expect(screen.getByText('Remote files')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '新建本地歌单' })).toBeTruthy();
+    expect(screen.getByText('智能生成')).toBeTruthy();
+    expect(getPlaylistItems.mock.calls.every(([id]) => id === localPlaylist.id)).toBe(true);
+  });
+
   it('opens streaming artist and album details with the original provider identity', async () => {
     const remotePlaylist = playlist({
       id: 'netease-playlist',
@@ -1450,7 +1543,7 @@ describe('PlaylistsPage actions menu', () => {
     expect(await screen.findByText('已刷新歌单：QQ Mix，共 2 首')).toBeTruthy();
   });
 
-  it('imports Spotify playlist links from the sidebar form', async () => {
+  it.each(['all', 'local'] as const)('imports Spotify playlist links while the source filter is %s', async (filter) => {
     const spotifyUrl = 'https://open.spotify.com/playlist/5MFN2Ep3ZU2FIQWIXNSLrT?si=866d26088e4a4a47';
     const importedPlaylist = playlist({
       id: 'spotify-playlist',
@@ -1502,6 +1595,10 @@ describe('PlaylistsPage actions menu', () => {
     renderPlaylistsPage();
 
     const input = await screen.findByPlaceholderText('粘贴网易云 / QQ 音乐 / Spotify 歌单链接');
+    if (filter === 'local') {
+      fireEvent.click(screen.getByRole('button', { name: '歌单类型筛选' }));
+      fireEvent.click(screen.getByRole('option', { name: '本地' }));
+    }
     fireEvent.change(input, { target: { value: spotifyUrl } });
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
@@ -1516,6 +1613,7 @@ describe('PlaylistsPage actions menu', () => {
     await waitFor(() => expect(importPlaylistFromUrl).toHaveBeenCalledWith(spotifyUrl));
     expect(await screen.findByText('已添加歌单：Spotify Mix，共 1 首')).toBeTruthy();
     expect(await screen.findByRole('button', { name: 'Spotify Song' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Spotify Mix' })).toBeTruthy();
 
     const secondUrl = 'https://open.spotify.com/playlist/second';
     const secondInput = await screen.findByPlaceholderText('粘贴网易云 / QQ 音乐 / Spotify 歌单链接');
@@ -1668,7 +1766,8 @@ describe('PlaylistsPage actions menu', () => {
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
     expect(await screen.findByText(/Spotify 限制了非创建者\/协作者歌单的曲目读取/u)).toBeTruthy();
-    fireEvent.click(await screen.findByRole('button', { name: '打开 Spotify 复制歌单' }));
+    const wall = document.querySelector('.playlist-sidebar') as HTMLElement;
+    fireEvent.click(await within(wall).findByRole('button', { name: '打开 Spotify 复制歌单' }));
 
     await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith(spotifyUrl));
   });

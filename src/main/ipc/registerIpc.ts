@@ -1,3 +1,4 @@
+import { registerStreamingIpc } from './streamingIpc';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -992,6 +993,7 @@ export const registerIpc = (): void => {
   registerIpcStartupStep('plugin', registerPluginIpc);
   registerIpcStartupStep('lastfm', registerLastFmIpc);
   registerIpcStartupStep('library', registerLibraryIpc);
+  registerIpcStartupStep('streaming', registerStreamingIpc);
   registerIpcStartupStep('lyrics', registerLyricsIpc);
   registerIpcStartupStep('mv', registerMvIpc);
   registerIpcStartupStep('hq-player', registerHqPlayerIpc);

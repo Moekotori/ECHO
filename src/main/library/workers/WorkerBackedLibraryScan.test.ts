@@ -135,13 +135,14 @@ describe('WorkerBackedLibraryScan', () => {
     });
 
     try {
-      const result = await scanWorkers.metadataReader.read('D:\\Music\\Worker.flac');
+      const result = await scanWorkers.metadataReader.read('D:\\Music\\Worker.flac', { readCover: false });
 
       expect(result.fields.title).toBe('Worker Title');
       expect(workers[0]?.requests).toEqual([
         expect.objectContaining({
           type: 'metadata:read',
           filePath: 'D:\\Music\\Worker.flac',
+          options: { readCover: false },
         }),
       ]);
     } finally {

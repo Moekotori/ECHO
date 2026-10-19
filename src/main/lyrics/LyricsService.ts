@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { parseImportedLyrics } from './importedLyrics';
 import { existsSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import electron from 'electron';
@@ -1475,21 +1476,12 @@ export class LyricsService {
 
   async applyCustomLrc(trackId: string, lrcText: string, fileName?: string | null): Promise<TrackLyrics> {
     const track = this.library.getTrack(trackId);
-    const normalizedText = lrcText.replace(/^\uFEFF/u, '').trim();
     if (!track) {
       throw new Error(`Unknown track ${trackId}`);
     }
 
-    if (!normalizedText) {
-      throw new Error('Custom LRC file is empty');
-    }
-
     const query = toQuery(track);
-    const syncedLines = normalizeSyncedLyricAlternates(parseSyncedLyrics(normalizedText));
-    const plainLines = syncedLines.length > 0 ? [] : parsePlainLyrics(normalizedText);
-    if (syncedLines.length === 0 && plainLines.length === 0) {
-      throw new Error('Custom LRC file does not contain readable lyrics');
-    }
+    const { normalizedText, syncedLines, plainLines } = parseImportedLyrics(lrcText, fileName);
 
     const lyrics: TrackLyrics = {
       id: randomUUID(),

@@ -1,4 +1,8 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLibraryPageRefresh } from '../hooks/useLibraryPageRefresh';
+import { LibraryWallFilterControl } from '../components/library/LibraryWallFilterControl';
+import { DirectionalSortOptions } from '../components/ui/DirectionalSortOptions';
+import { artistSortDirectionPairs } from '../utils/sortDirection';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Image as ImageIcon, ImagePlus, Link, ListFilter, Play, RefreshCw, RotateCcw, Search } from 'lucide-react';
@@ -6,8 +10,6 @@ import type { ArtistGrouping, LibraryArtist, LibrarySort } from '../../shared/ty
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import { ArtistDetailView } from '../components/artist/ArtistDetailView';
 import { artistMark } from '../components/artist/artistVisual';
-import { LibrarySourceSwitch } from '../components/library/LibrarySourceSwitch';
-import { RemoteSourceFilter } from '../components/library/RemoteSourceFilter';
 import { DeferredWallImage, useScrollImagePause } from '../components/ui/DeferredWallImage';
 import { InfiniteScrollSentinel, readPageScrollTop, writePageScrollTop } from '../components/ui/InfiniteScrollSentinel';
 import { MediaWallScrollSpacer, useMediaWallScrollSpacer } from '../components/ui/MediaWallScrollSpacer';
@@ -17,7 +19,7 @@ import { useSharedPlaybackActivityState } from '../stores/playbackStatusStore';
 import type { DetailReturnTarget } from '../utils/albumNavigation';
 import { artistDetailNavigationEvent, consumePendingArtistDetailNavigation } from '../utils/artistNavigation';
 import { getRemoteSourcesBridge } from '../utils/echoBridge';
-import { useImeAwareDebouncedSearch } from '../utils/imeInput';
+import { DebouncedSearchInput } from '../components/common/DebouncedSearchInput';
 import { readStoredLibrarySort, writeStoredLibrarySort } from '../utils/librarySortMemory';
 import { readStoredLibrarySourceMode, writeStoredLibrarySourceMode, type LibrarySourceMode } from '../utils/librarySourceMode';
 
@@ -207,10 +209,11 @@ export const ArtistsPage = (): JSX.Element => {
   const { t } = useI18n();
   const [artists, setArtists] = useState<LibraryArtist[]>([]);
   const [total, setTotal] = useState(0);
-  const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
+  const [search, setSearch] = useState('');
   const [sort, setSort] = useState<LibrarySort>(readStoredArtistSort);
   const [artistGrouping, setArtistGrouping] = useState<ArtistGrouping>(readStoredArtistGrouping);
   const [sourceMode, setSourceModeState] = useState<LibrarySourceMode>(() => readStoredLibrarySourceMode());
+  const [selectedFolderId, setSelectedFolderId] = useState('');
   const [remoteSourceId, setRemoteSourceId] = useState<string | null>(null);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [remoteSourcesLoaded, setRemoteSourcesLoaded] = useState(false);
@@ -312,6 +315,7 @@ export const ArtistsPage = (): JSX.Element => {
           search,
           sort,
           sourceProvider: sourceMode,
+          ...(sourceMode === 'local' && selectedFolderId ? { folderIds: [selectedFolderId] } : {}),
           ...(sourceMode === 'remote' && remoteSourceId ? { sourceId: remoteSourceId } : {}),
           ...(prioritizeArtistAvatars ? { prioritizeArtistAvatars: true } : {}),
           ...(artistGrouping === 'albumArtist' ? { artistGrouping: 'albumArtist' as const } : {}),
@@ -343,7 +347,7 @@ export const ArtistsPage = (): JSX.Element => {
         }
       }
     },
-    [artistGrouping, prioritizeArtistAvatars, remoteSourceId, search, sort, sourceMode, t],
+    [artistGrouping, prioritizeArtistAvatars, remoteSourceId, search, selectedFolderId, sort, sourceMode, t],
   );
 
   const setSourceMode = useCallback((mode: LibrarySourceMode): void => {
@@ -414,8 +418,7 @@ export const ArtistsPage = (): JSX.Element => {
     return () => window.removeEventListener('library:changed', handleRemoteSourcesChanged);
   }, [refreshRemoteSources, sourceMode]);
 
-  useEffect(() => {
-    const handleLibraryChanged = (event: Event): void => {
+  useLibraryPageRefresh((event) => {
       const scrollTop = readPageScrollTop(pageRootRef.current);
       if (isPreserveScrollLibraryEvent(event) && scrollTop > preserveScrollThresholdPx) {
         void loadArtists(1, 'replace', {
@@ -427,15 +430,11 @@ export const ArtistsPage = (): JSX.Element => {
 
       writePageScrollTop(pageRootRef.current, 0);
       void loadArtists(1, 'replace');
-    };
-
-    window.addEventListener('library:changed', handleLibraryChanged);
-    return () => window.removeEventListener('library:changed', handleLibraryChanged);
-  }, [artists.length, loadArtists, page]);
+  });
 
   useLayoutEffect(() => {
     writePageScrollTop(pageRootRef.current, 0);
-  }, [artistGrouping, prioritizeArtistAvatars, search, sort, sourceMode]);
+  }, [artistGrouping, prioritizeArtistAvatars, search, selectedFolderId, sort, sourceMode]);
 
   useLayoutEffect(() => {
     if (selectedArtist || !shouldRestorePageScrollRef.current) {
@@ -874,10 +873,11 @@ export const ArtistsPage = (): JSX.Element => {
       <div className="songs-control-row">
         <label className="search-box">
           <Search size={18} aria-hidden="true" />
-          <input
+          <DebouncedSearchInput
             type="search"
             placeholder={t('library.artists.searchPlaceholder')}
-            {...searchInputProps}
+            initialValue={search}
+            onSearchChange={setSearch}
           />
         </label>
 
@@ -893,8 +893,9 @@ export const ArtistsPage = (): JSX.Element => {
             <span className="sort-button-label">{t('library.artists.avatarPriority')}</span>
           </button>
 
-          <LibrarySourceSwitch value={sourceMode} onChange={setSourceMode} />
-          {sourceMode === 'remote' ? <RemoteSourceFilter sources={remoteSources} value={remoteSourceId} onChange={setRemoteSourceId} /> : null}
+          <LibraryWallFilterControl sourceMode={sourceMode} remoteSources={remoteSources} remoteSourceId={remoteSourceId}
+            selectedFolderId={selectedFolderId} onSourceModeChange={setSourceMode}
+            onRemoteSourceChange={setRemoteSourceId} onFolderChange={setSelectedFolderId} />
 
           <div className="sort-select" ref={sortMenuRef}>
             <button
@@ -922,28 +923,9 @@ export const ArtistsPage = (): JSX.Element => {
                   <span>{t('library.artists.grouping.albumArtist')}</span>
                   {artistGrouping === 'albumArtist' ? <Check size={14} /> : null}
                 </button>
-                {artistSortGroups.map((group) => (
-                  <Fragment key={group.labelKey}>
-                    <div className="sort-menu-divider" role="presentation" />
-                    <div className="sort-menu-section-title" role="presentation">{t(group.labelKey)}</div>
-                    {group.options.map((option) => (
-                      <button
-                        key={option.value}
-                        className="sort-option"
-                        type="button"
-                        role="option"
-                        aria-selected={sort === option.value}
-                        onClick={() => {
-                          setSort(option.value);
-                          setIsSortOpen(false);
-                        }}
-                      >
-                        <span>{t(option.labelKey)}</span>
-                        {sort === option.value ? <Check size={14} /> : null}
-                      </button>
-                    ))}
-                  </Fragment>
-                ))}
+                <DirectionalSortOptions value={sort} pairs={artistSortDirectionPairs} leadingDivider
+                  groups={artistSortGroups.map((group) => ({ label: t(group.labelKey), options: group.options.map((option) => ({ value: option.value, label: t(option.labelKey) })) }))}
+                  onSelect={(value, directionOnly) => { setSort(value); if (!directionOnly) setIsSortOpen(false); }} />
               </div>
             ) : null}
           </div>

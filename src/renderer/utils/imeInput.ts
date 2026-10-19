@@ -51,15 +51,23 @@ export const useImeAwareDebouncedSearch = <TElement extends SearchInputElement =
   const [searchInput, setSearchInput] = useState(initialValue);
   const [search, setSearch] = useState(initialValue.trim());
   const isComposingRef = useRef(false);
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (isComposingRef.current) {
+    if (isComposingRef.current || searchInput.trim() === search) {
       return undefined;
     }
 
-    const timer = window.setTimeout(() => setSearch(searchInput.trim()), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [delayMs, searchInput]);
+    const timer = window.setTimeout(() => {
+      timerRef.current = null;
+      if (!isComposingRef.current) setSearch(searchInput.trim());
+    }, delayMs);
+    timerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (timerRef.current === timer) timerRef.current = null;
+    };
+  }, [delayMs, searchInput, search]);
 
   const handleChange = useCallback((event: ChangeEvent<TElement>): void => {
     setSearchInput(event.currentTarget.value);
@@ -67,6 +75,10 @@ export const useImeAwareDebouncedSearch = <TElement extends SearchInputElement =
 
   const handleCompositionStart = useCallback((): void => {
     isComposingRef.current = true;
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
   }, []);
 
   const handleCompositionEnd = useCallback((event: CompositionEvent<TElement>): void => {

@@ -16,3 +16,5 @@ import './theme-presets.css';
 import './accessibility.css';
 import './scrollbars.css';
 import './player-transport-polish.css';
+import './player-bar-polish.css';
+import './player-utilities.css';

@@ -8,6 +8,7 @@ import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import { formatPercent } from './playerFormat';
 
 type PlayerVolumeControlProps = {
+  embedded?: boolean;
   status: AudioStatus | null;
   onStatusChange: (status: AudioStatus) => void;
   onError: (message: string) => void;
@@ -64,6 +65,7 @@ const distanceFromRect = (x: number, y: number, rect: DOMRect): number => {
 };
 
 export const PlayerVolumeControl = ({
+  embedded = false,
   status,
   onStatusChange,
   onError,
@@ -199,7 +201,7 @@ export const PlayerVolumeControl = ({
   }, [onFixedVolumeChange, onStatusChange]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || embedded) {
       return undefined;
     }
 
@@ -232,7 +234,7 @@ export const PlayerVolumeControl = ({
       window.removeEventListener('pointermove', handlePointerMove, true);
       window.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [isOpen, onOpenChange]);
+  }, [embedded, isOpen, onOpenChange]);
 
   const commitVolume = useCallback(
     async (nextVolume: number): Promise<void> => {
@@ -335,8 +337,8 @@ export const PlayerVolumeControl = ({
   };
 
   return (
-    <div className="volume-control" ref={rootRef} onMouseEnter={() => onOpenChange(true)} onWheel={handleWheel}>
-      <button
+    <div className="volume-control" ref={rootRef} data-embedded={embedded || undefined} onMouseEnter={embedded ? undefined : () => onOpenChange(true)} onWheel={handleWheel}>
+      {!embedded ? <button
         className="icon-button"
         type="button"
         aria-label={volumeButtonLabel}
@@ -345,11 +347,12 @@ export const PlayerVolumeControl = ({
         onFocus={() => onOpenChange(true)}
       >
         <Icon size={18} />
-      </button>
-      {shouldRenderPopover ? (
-        <div className="volume-popover control-popover" data-open={isPopoverVisible} ref={popoverRef}>
+      </button> : null}
+      {embedded || shouldRenderPopover ? (
+        <div className="volume-popover control-popover" data-open={embedded || isPopoverVisible} ref={popoverRef}>
           <div className="control-popover-header">
             <span className="control-popover-readout">
+              {embedded ? <span className="player-utility-field-label">{t('settings.appearance.playerBarButtons.volume')}</span> : null}
               <span className="control-popover-value">{formatPercent(volume)}</span>
             </span>
             <button

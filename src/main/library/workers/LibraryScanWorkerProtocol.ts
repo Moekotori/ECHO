@@ -1,3 +1,4 @@
+import type { MetadataReadOptions } from './MetadataReader';
 import type { FileIdentityObservation } from '../FileIdentityService';
 import type { CoverCacheRepairOptions, CoverExtractOptions, CoverResult, MetadataResult } from '../libraryTypes';
 import type { SearchIndexTrackFields } from '../SearchIndexTokens';
@@ -7,6 +8,7 @@ export type LibraryScanWorkerRequest =
       requestId: number;
       type: 'metadata:read';
       filePath: string;
+      options?: MetadataReadOptions;
     }
   | {
       requestId: number;

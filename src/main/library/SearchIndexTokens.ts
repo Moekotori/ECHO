@@ -1,5 +1,5 @@
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { withJapaneseSearchRomanizer } from './JapaneseSearchRomanizer';
+export { preloadSearchIndexRomanizer } from './JapaneseSearchRomanizer';
 import { pinyin } from 'pinyin-pro';
 
 export type SearchIndexTrackFields = {
@@ -11,20 +11,6 @@ export type SearchIndexTrackFields = {
   path?: string | null;
   remotePath?: string | null;
 };
-
-type KuroshiroInstance = {
-  convert: (
-    text: string,
-    options:
-      | { to: 'romaji'; mode: 'spaced'; romajiSystem: 'hepburn' }
-      | { to: 'hiragana' | 'katakana'; mode: 'spaced' },
-  ) => Promise<string>;
-};
-
-type KuroshiroConstructor = new () => { init: (analyzer: unknown) => Promise<void> } & KuroshiroInstance;
-type KuromojiAnalyzerConstructor = new (options?: { dictPath?: string }) => unknown;
-
-const nodeRequire = createRequire(import.meta.url);
 
 const searchSeparatorPattern = /[\s!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~_-]+/u;
 const cjkPattern = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -39,77 +25,9 @@ const maxRomajiWindow = 8;
 const maxRomanizationInputLength = 512;
 const maxRomanizationCacheEntries = 4096;
 
-let kuroshiroPromise: Promise<KuroshiroInstance | null> | null = null;
-let hasLoggedKuroshiroInitFailure = false;
 const japaneseConversionCache = new Map<string, string | null>();
 
 const normalizeSearchText = (value: string): string => value.normalize('NFKC').trim().toLocaleLowerCase();
-
-const resolveDefaultExport = <T>(moduleValue: unknown): T | null => {
-  const firstDefault =
-    moduleValue && typeof moduleValue === 'object' && 'default' in moduleValue
-      ? (moduleValue as { default?: unknown }).default
-      : moduleValue;
-  const nestedDefault =
-    firstDefault && typeof firstDefault === 'object' && 'default' in firstDefault
-      ? (firstDefault as { default?: unknown }).default
-      : firstDefault;
-
-  return typeof nestedDefault === 'function' ? (nestedDefault as T) : null;
-};
-
-const resolveKuromojiDictPath = (): string | undefined => {
-  try {
-    const entry = nodeRequire.resolve('kuromoji');
-    return join(dirname(dirname(entry)), 'dict');
-  } catch {
-    return undefined;
-  }
-};
-
-const makeKuromojiAnalyzer = (KuromojiAnalyzer: KuromojiAnalyzerConstructor): unknown => {
-  const dictPath = resolveKuromojiDictPath();
-  return dictPath ? new KuromojiAnalyzer({ dictPath }) : new KuromojiAnalyzer();
-};
-
-const logKuroshiroInitFailure = (error: unknown): void => {
-  if (hasLoggedKuroshiroInitFailure) {
-    return;
-  }
-
-  hasLoggedKuroshiroInitFailure = true;
-  const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[library-search] Japanese romaji search disabled: ${message}`);
-};
-
-const getKuroshiro = async (): Promise<KuroshiroInstance | null> => {
-  if (!kuroshiroPromise) {
-    kuroshiroPromise = (async () => {
-      try {
-        const [kuroshiroModule, kuromojiModule] = await Promise.all([
-          import('kuroshiro'),
-          import('kuroshiro-analyzer-kuromoji'),
-        ]);
-        const Kuroshiro = resolveDefaultExport<KuroshiroConstructor>(kuroshiroModule);
-        const KuromojiAnalyzer = resolveDefaultExport<KuromojiAnalyzerConstructor>(kuromojiModule);
-        if (!Kuroshiro || !KuromojiAnalyzer) {
-          return null;
-        }
-
-        const kuroshiro = new Kuroshiro();
-        await kuroshiro.init(makeKuromojiAnalyzer(KuromojiAnalyzer));
-        return kuroshiro;
-      } catch (error) {
-        logKuroshiroInitFailure(error);
-        return null;
-      }
-    })();
-  }
-
-  return kuroshiroPromise;
-};
-
-export const preloadSearchIndexRomanizer = async (): Promise<boolean> => Boolean(await getKuroshiro());
 
 export const hasJapaneseSearchText = (fields: SearchIndexTrackFields): boolean =>
   [
@@ -164,28 +82,29 @@ const convertJapaneseText = async (value: string, target: 'romaji' | 'hiragana' 
     return japaneseConversionCache.get(cacheKey) ?? null;
   }
 
-  const kuroshiro = await getKuroshiro();
-  if (!kuroshiro) {
-    return null;
-  }
+  return withJapaneseSearchRomanizer(async (kuroshiro) => {
+    if (!kuroshiro) {
+      return null;
+    }
 
-  try {
-    const converted = normalizeRomanizedText(
-      target === 'romaji'
-        ? await kuroshiro.convert(normalized, {
-            to: 'romaji',
-            mode: 'spaced',
-            romajiSystem: 'hepburn',
-          })
-        : await kuroshiro.convert(normalized, {
-            to: target,
-            mode: 'spaced',
-          }),
-    );
-    return rememberJapaneseConversion(cacheKey, converted && converted !== normalized ? converted : null);
-  } catch {
-    return rememberJapaneseConversion(cacheKey, null);
-  }
+    try {
+      const converted = normalizeRomanizedText(
+        target === 'romaji'
+          ? await kuroshiro.convert(normalized, {
+              to: 'romaji',
+              mode: 'spaced',
+              romajiSystem: 'hepburn',
+            })
+          : await kuroshiro.convert(normalized, {
+              to: target,
+              mode: 'spaced',
+            }),
+      );
+      return rememberJapaneseConversion(cacheKey, converted && converted !== normalized ? converted : null);
+    } catch {
+      return rememberJapaneseConversion(cacheKey, null);
+    }
+  });
 };
 
 const romanizeJapaneseText = (value: string): Promise<string | null> => convertJapaneseText(value, 'romaji');

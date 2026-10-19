@@ -1,0 +1,666 @@
+/*
+ * Player bar visual polish. Loads after app.css / ui-polish.css /
+ * player-transport-polish.css and only refines the main-window player bar.
+ * The lyrics mini player drawer keeps its own dark-glass styling, so every
+ * rule is scoped to :not(.app-shell--lyrics-player-drawer).
+ */
+
+/*
+ * ---- Bar shell: shorter chrome, larger artwork ----
+ * Wide desktop keeps the taller artwork. Narrow windows compress in one row
+ * instead of stacking the now-playing and transport blocks.
+ */
+@media (min-width: 981px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) {
+    --player-height: 108px;
+  }
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar {
+  padding: 6px 20px;
+}
+
+@media (min-width: 1181px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, clamp(560px, 48vw, 760px)) minmax(0, 1fr);
+    padding-inline: 28px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-center {
+    max-width: 760px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status {
+    gap: 20px;
+  }
+}
+
+/*
+ * ---- Bar shell: a quiet accent aura rising behind the transport ----
+ * Wallpaper and acrylic modes own their backgrounds, so they are excluded.
+ */
+.app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--wallpaper-ready):not(.app-shell--acrylic) .player-bar {
+  border-top-color: color-mix(in srgb, var(--theme-accent-solid-bg) 16%, var(--theme-panel-border));
+  background:
+    radial-gradient(
+      56% 150% at 50% 138%,
+      color-mix(in srgb, var(--theme-accent-solid-bg) 10%, transparent),
+      transparent 64%
+    ),
+    var(--echo-polish-player-bg);
+}
+
+/*
+ * ---- Cover art ----
+ * The stock cover looks "blocked" for three stacked reasons:
+ * 1. .cover-sheen paints a dark 315deg veil over the bottom of the artwork.
+ * 2. Large drop / inset shadows sit on the image itself.
+ * 3. .player-now { overflow: hidden } clips those shadows into a hard band
+ *    flush with the cover's bottom edge.
+ * Show the artwork cleanly; title overflow is already clipped by
+ * .player-track-copy.
+ *
+ * Flattening alone was not enough: a 96px cover in the bar's 96px content box
+ * (108px tall minus 6px padding) ran edge to edge, so the outlined square read
+ * as pasted onto the bar rather than sitting in it. Sizing the artwork below
+ * the content box leaves 12px of bar above and below it, and an inner hairline
+ * plus a short grounded shadow replace the hard outline.
+ */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-now {
+  gap: 14px;
+  overflow: visible;
+  transition: transform 150ms var(--echo-motion-ease-quick);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar[data-mouse-swipe] {
+  cursor: grabbing;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar[data-mouse-swipe] .player-now {
+  transform: translate3d(var(--player-mouse-swipe-offset, 0), 0, 0);
+  transition: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover {
+  --player-cover-shadow:
+    0 1px 2px color-mix(in srgb, var(--theme-heading-text) 8%, transparent),
+    0 10px 22px -12px color-mix(in srgb, var(--theme-heading-text) 40%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--theme-heading-text) 9%, transparent);
+  width: 84px;
+  height: 84px;
+  border: 0;
+  border-radius: 11px;
+  box-shadow: var(--player-cover-shadow);
+  filter: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover:hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover:active {
+  box-shadow: var(--player-cover-shadow);
+  transform: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover img {
+  display: block;
+  border-radius: inherit;
+  box-shadow: none;
+  filter: none;
+}
+
+.player-cover > .player-cover-visual {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  border-radius: inherit;
+}
+
+.player-cover > .player-cover-preload {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+html .app-shell .player-cover[data-empty='true'] > .player-cover-visual > .player-cover-placeholder {
+  display: none;
+}
+
+.player-track-copy-shell {
+  display: grid;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.player-track-copy-shell > .player-track-copy {
+  grid-area: 1 / 1;
+  align-self: center;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover .cover-sheen {
+  display: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy {
+  gap: 6px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy strong {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.014em;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy > span {
+  color: color-mix(in srgb, var(--theme-muted-text) 86%, var(--theme-heading-text) 14%);
+  font-size: 12.5px;
+  font-weight: 640;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy .player-marquee[data-clickable='true']:focus-visible {
+  color: var(--color-accent);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy .player-marquee[data-clickable='true']:focus-visible .player-marquee-inner {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 58%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/*
+ * ---- Status chips: soft borderless tints, matching the song list rows ----
+ * Neutral chips sit on a faint ink wash; format chips (FLAC / Hi-Res / ...)
+ * carry a light accent tint as the visual anchor; warnings keep a warm tone.
+ */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags {
+  gap: 6px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag {
+  --player-chip-enter-delay: 0ms;
+
+  height: 20px;
+  padding: 0 8px;
+  color: color-mix(in srgb, var(--theme-muted-text) 82%, var(--theme-heading-text) 18%);
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-heading-text) 5%, transparent);
+  box-shadow: none;
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.015em;
+  transform-origin: left center;
+  animation: echo-player-status-chip-enter var(--echo-motion-reveal-fade-ms) var(--echo-motion-ease-reveal) backwards;
+  animation-delay: var(--player-chip-enter-delay);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag:nth-child(2) {
+  --player-chip-enter-delay: 18ms;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag:nth-child(3) {
+  --player-chip-enter-delay: 36ms;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag:nth-child(4) {
+  --player-chip-enter-delay: 54ms;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag:nth-child(n + 5) {
+  --player-chip-enter-delay: 72ms;
+}
+
+@keyframes echo-player-status-chip-enter {
+  from {
+    transform: translateY(3px) scale(0.96);
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags :is(
+  .tag-flac,
+  .tag-hires,
+  .tag-mqa,
+  .tag-lossless,
+  .tag-depth,
+  .tag-bitrate
+) {
+  color: color-mix(in srgb, var(--theme-accent-text-strong) 88%, var(--theme-muted-text) 12%);
+  background: color-mix(in srgb, var(--theme-accent-bg) 55%, transparent);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags :is(
+  .tag-warning,
+  .tag-bit-perfect,
+  .tag-eq
+) {
+  color: var(--theme-warning-text);
+  background: var(--theme-warning-bg);
+}
+
+/* ---- Progress: accent gradient rail with a friendlier thumb ---- */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-row {
+  gap: 10px;
+  color: color-mix(in srgb, var(--theme-muted-text) 88%, var(--theme-heading-text) 12%);
+  font-size: 12px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* The elapsed time reads slightly darker than the duration for hierarchy. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-row span:first-child {
+  color: color-mix(in srgb, var(--theme-heading-text) 46%, var(--theme-muted-text) 54%);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-track:not([data-waveform="true"]) {
+  height: 5px;
+  background: color-mix(in srgb, var(--theme-muted-text) 17%, transparent);
+  transition: height 140ms ease;
+}
+
+/* Thicken the rail under the pointer; the row is taller than the rail, so
+ * this never shifts layout. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-track:not([data-waveform="true"]):hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-track:not([data-waveform="true"]):focus-within {
+  height: 7px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-track:not([data-waveform="true"]) .progress-fill {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--theme-accent-solid-bg) 72%, var(--theme-panel-bg-strong)),
+    var(--theme-accent-solid-bg)
+  );
+  box-shadow: 0 0 8px color-mix(in srgb, var(--theme-accent-solid-bg) 26%, transparent);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-track:not([data-waveform="true"]) .progress-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--theme-panel-bg-strong);
+  background: var(--theme-accent-solid-bg);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--theme-accent-solid-bg) 45%, rgb(0 0 0 / 0.2));
+}
+
+/* The main glyph-only control deliberately does not use the legacy .play-button
+ * class, so production CSS extraction cannot restore its themed round plate. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control {
+  display: grid;
+  position: relative;
+  place-items: center;
+  width: 48px !important;
+  height: 48px !important;
+  padding: 0;
+  color: var(--theme-heading-text);
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  isolation: auto;
+  appearance: none;
+  transition: transform 150ms ease;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control:hover {
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: translateY(-1px);
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control::before {
+  display: none !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control:active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* Chromium can promote a previously clicked player control to :focus-visible
+ * when a media key is used later. Replace the native rectangle/circle with
+ * feedback on the glyph itself for pointer focus. Keyboard focus must retain
+ * its ring even when the optional always-focus mode is disabled. */
+html:not([data-accessibility-always-show-focus='true'])
+  body:not([data-echo-gamepad-input='true'])
+  .app-shell:not(.app-shell--lyrics-player-drawer)
+  .player-bar
+  :is(.icon-button, .player-primary-control, .audio-icon-command, .signal-path-control, .player-marquee[data-clickable='true']):focus:not(:focus-visible) {
+  border-color: transparent !important;
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
+}
+
+html:not([data-accessibility-always-show-focus='true'])
+  body:not([data-echo-gamepad-input='true'])
+  .app-shell:not(.app-shell--lyrics-player-drawer)
+  .player-bar
+  :is(.icon-button, .player-primary-control, .audio-icon-command, .signal-path-control):focus-visible
+  :is(.player-control-icon, svg:not(.spinning-icon)) {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--theme-accent-solid-bg) 38%, transparent));
+  transform: scale(1.05);
+  transform-origin: center;
+}
+
+/*
+ * ---- Transport icons ----
+ * player-transport-polish.css flattens these with !important, so matching
+ * !important here (loaded later) is required to restyle them.
+ */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport {
+  gap: 10px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control {
+  border-radius: 8px !important;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button > svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.8;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-like-filled-icon {
+  stroke-width: 0;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:focus-visible {
+  background: transparent !important;
+  transform: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:hover,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--theme-accent-bg) 64%, transparent) !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true'] {
+  background: transparent !important;
+}
+
+/* Liked state reads as a warm rose regardless of the theme accent. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-like-button.is-soft-active {
+  color: color-mix(in srgb, #f43f5e 72%, var(--theme-accent-text-strong)) !important;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-like-button.is-soft-active svg {
+  fill: currentColor;
+}
+
+/* ---- Right cluster: give quiet icons a soft hover surface ---- */
+/* Slightly enlarge the two footer glyphs without changing their hit areas. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status > .player-now-playing-more > .icon-button > svg,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status > .volume-control > .icon-button > svg {
+  scale: 1.12;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status > .player-now-playing-more + .volume-control {
+  margin-inline-start: 6px;
+}
+
+@media (max-width: 1180px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status {
+    gap: 6px;
+  }
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status .icon-button {
+  border-radius: 8px;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status .icon-button:focus-visible {
+  background: transparent;
+  transform: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status .icon-button:hover {
+  color: var(--theme-heading-text);
+  background: color-mix(in srgb, var(--theme-accent-bg) 54%, transparent);
+  transform: none;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status .icon-button.is-soft-active {
+  color: var(--theme-accent-text-strong);
+  background: transparent;
+}
+
+/*
+ * Active footer icons stay glyph + indicator only. Theme presets restore a
+ * filled 50% disc on .is-soft-active with higher specificity than the earlier
+ * flatten rules, so this late override has to match that selector weight.
+ */
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true']),
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true']),
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true']) {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true'])::before,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true'])::before,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.icon-button, .audio-icon-command, .signal-path-control):not(.play-button):is(.is-soft-active, [aria-pressed='true'])::before {
+  opacity: 0 !important;
+}
+
+/* Output device label: follow the theme ink instead of a hard-coded grey. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status > span {
+  color: var(--theme-muted-text);
+}
+
+/* Volume / speed popovers: tie the slider and active buttons to the theme
+ * accent instead of the stock navy. */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar :is(.volume-popover, .speed-popover) {
+  --control-popover-accent: var(--theme-accent-solid-bg);
+  --control-popover-accent-strong: color-mix(in srgb, var(--theme-accent-solid-bg) 82%, #000000);
+}
+
+/* ---- Shape consistency for the remaining chips ---- */
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-loading-hint,
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .remote-track-source-badge {
+  border-radius: 6px;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .remote-track-source-badge {
+  border: 0;
+}
+
+/*
+ * ---- Narrow windows ----
+ * The smallest desktop band uses compact controls. At 981-1180px the normal
+ * two-row center still fits and must not flatten when UI zoom crosses 1180px.
+ */
+@media (max-width: 1180px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, auto);
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-center {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-transport-shell,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport {
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-row {
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags {
+    flex-wrap: nowrap;
+    max-height: 20px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-anchor,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-tool-button,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-lyrics-button {
+    display: none;
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1180px) {
+  /* Equal side tracks keep the controls centered as the viewport crosses the
+     wide-player breakpoint. The middle track stays large enough for icons. */
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, clamp(440px, 45vw, 540px)) minmax(0, 1fr);
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar .player-center {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar .signal-path-anchor,
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar .transport-tool-button,
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar .transport-lyrics-button {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 980px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) {
+    --player-height: 92px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    padding: 6px 16px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover {
+    width: 64px;
+    height: 64px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy strong {
+    font-size: 15px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag:nth-child(n + 3) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-shuffle-button,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport-repeat-button {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) {
+    --player-height: 88px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar {
+    padding: 6px 12px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover {
+    width: 48px;
+    height: 48px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags {
+    display: none;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .progress-row span:last-child {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover-visual,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-track-copy-shell > .player-track-copy,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-now,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover:hover,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-cover:active,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control:hover,
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-primary-control:active {
+    transform: none;
+    transition: none;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-tags .hifi-tag {
+    animation: none;
+  }
+}
+
+.app-shell[data-low-spec-mode='true']:not(.app-shell--lyrics-player-drawer) .player-bar :is(
+  .player-cover-visual,
+  .player-track-copy
+) {
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+}
+
+/*
+ * ---- Right cluster alignment ----
+ * The center column stacks the transport row over the progress row, so its
+ * visual anchor (the buttons) sits above the bar's midline while the right
+ * cluster centered on the midline and read as sagging. Lift the cluster by the
+ * part of the center stack below the transport row (shell gap + progress row):
+ * a centered item with a bottom margin M moves up by M / 2, matching the
+ * transport row's offset of (gap + progress) / 2.
+ */
+@media (min-width: 981px) {
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar {
+    --player-progress-row-block: 16px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar:has(.progress-track[data-waveform="true"]) {
+    --player-progress-row-block: 24px;
+  }
+
+  .app-shell:not(.app-shell--lyrics-player-drawer):not(.app-shell--lyrics) .player-bar .output-status {
+    align-self: center;
+    margin-block-end: calc(10px + var(--player-progress-row-block));
+  }
+}

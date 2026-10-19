@@ -158,8 +158,9 @@ const renderSongsPage = async (): Promise<void> => {
   );
 };
 
-const openSongFilters = (): void => {
+const openSongFilters = (field: RegExp = /条件|Condition/): void => {
   fireEvent.click(screen.getByRole('button', { name: /筛选|Filter/ }));
+  fireEvent.click(screen.getByRole('combobox', { name: field }));
 };
 
 const makeTrack = (overrides: Partial<LibraryTrack> = {}): LibraryTrack => ({
@@ -574,7 +575,7 @@ describe('SongsPage', () => {
 
     await renderSongsPage();
     await screen.findByText('Song One');
-    openSongFilters();
+    openSongFilters(/采样率|Sample rate/);
     expect(screen.queryByRole('option', { name: /默认排序|Default sort/ })).toBeNull();
     fireEvent.click(screen.getByRole('option', { name: /192 kHz/ }));
 
@@ -588,6 +589,41 @@ describe('SongsPage', () => {
     );
     expect(document.querySelector('.sort-button-label')?.textContent).not.toContain('192');
     expect(document.querySelector('.sort-button-filter-count')?.textContent).toBe('1');
+  });
+
+  it('combines format and year filters and resets them together', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    installEcho([makeTrack()]);
+    await renderSongsPage();
+    await screen.findByText('Song One');
+    openSongFilters(/音频格式|Audio format/);
+    fireEvent.click(screen.getByRole('option', { name: 'FLAC' }));
+    fireEvent.click(screen.getByRole('combobox', { name: /按发行年份筛选|Filter by release year/ }));
+    fireEvent.click(screen.getByRole('option', { name: '2026' }));
+    await waitFor(() => expect(window.echo.library.getTracks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fileFormatFilter: 'flac', filterYear: 2026 }),
+    ));
+    fireEvent.click(screen.getByRole('button', { name: /重置|Reset/ }));
+    await waitFor(() => expect(window.echo.library.getTracks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fileFormatFilter: undefined, filterYear: undefined }),
+    ));
+  });
+
+  it('sends multiple sort priorities to paging and remembers them', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    installEcho([makeTrack()]);
+    await renderSongsPage();
+    await screen.findByText('Song One');
+    fireEvent.click(screen.getByRole('button', { name: /默认排序|Default sort/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /多选排序|Multi/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^按艺术家$|^Artist A-Z$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /发行年份.*新|Year.*new/i }));
+    await waitFor(() => expect(window.echo.library.getTracks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sorts: ['artist', 'yearDesc'] }),
+    ));
+    expect(JSON.parse(window.localStorage.getItem('echo-next.songs.sort-preference')!)).toEqual({
+      isMultiSortEnabled: true, selectedSorts: ['artist', 'yearDesc'],
+    });
   });
 
   it('filters the song list to osu imports from the filter section', async () => {

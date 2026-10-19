@@ -1234,13 +1234,13 @@ describe('Library Core', () => {
     });
 
     metadataByPath.set(cdPath, metadataResult({
-      title: 'CD Track',
+      title: 'CD Track', year: 2026, genre: 'Jazz',
       codec: 'FLAC',
       sampleRate: 44_100,
       bitDepth: 16,
     }));
     metadataByPath.set(hiResPath, metadataResult({
-      title: 'Hi Res Track',
+      title: 'Hi Res Track', year: 2026, genre: 'Jazz',
       codec: 'FLAC',
       sampleRate: 192_000,
       bitDepth: 24,
@@ -1267,6 +1267,21 @@ describe('Library Core', () => {
     expect(harness.service.getTracks({ pageSize: 10, audioFormatFilter: 'otherSampleRate' }).items.map((track) => track.title)).toEqual(['Podcast Rate']);
     expect(harness.service.getTracks({ pageSize: 10, audioFormatFilter: 'all' }).total).toBe(4);
 
+    expect(harness.service.getSongFilterGenres('local')).toContain('Jazz');
+    const folderId = harness.service.getFolders()[0].id;
+    const combined = { folderIds: [folderId], fileFormatFilter: 'flac' as const, filterYear: 2026, filterGenre: 'jazz', sorts: ['yearDesc', 'titleDesc'] as const };
+    const query = { ...combined, sorts: [...combined.sorts], pageSize: 1 };
+    const first = harness.service.getTracks(query);
+    const second = harness.service.getTracks({ ...query, page: 2 });
+    expect(first.total).toBe(2);
+    expect(first.items.map((track) => track.title)).toEqual(['Hi Res Track']);
+    expect(second.items.map((track) => track.title)).toEqual(['CD Track']);
+    expect(second.hasMore).toBe(false);
+    expect(harness.service.getTracks({ ...query, search: 'CD' }).total).toBe(1);
+    expect(harness.service.getTracks({ fileFormatFilter: 'wav' }).total).toBe(1);
+    expect(harness.service.getTracks({ fileFormatFilter: 'other' }).total).toBe(0);
+    expect(harness.service.getTracks({ folderIds: ['nonexistent'] }).total).toBe(0);
+    expect(harness.service.getTracks({ sourceProvider: 'remote', folderIds: [folderId] }).total).toBe(0);
     harness.cleanup();
   });
 

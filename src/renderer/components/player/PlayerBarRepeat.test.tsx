@@ -41,21 +41,16 @@ afterEach(() => {
 });
 
 describe('PlayerBar repeat mode', () => {
-  it('cycles the footer repeat control between order playback and repeat one', async () => {
+  it('cycles the unified mode control through order, shuffle, single and all repeat', async () => {
     installEcho();
-    render(
-      <PlaybackQueueProvider>
-        <PlayerBar />
-      </PlaybackQueueProvider>,
-    );
-
-    const repeatButton = screen.getByRole('button', { name: 'Repeat' });
-    expect(repeatButton.getAttribute('title')).toBe('Play in order');
-
-    fireEvent.click(repeatButton);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat' }).getAttribute('title')).toBe('Repeat one'));
-
-    fireEvent.click(screen.getByRole('button', { name: 'Repeat' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat' }).getAttribute('title')).toBe('Play in order'));
+    render(<PlaybackQueueProvider><PlayerBar /></PlaybackQueueProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '顺序播放' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '随机播放' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '随机播放' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '单曲循环' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '单曲循环' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '循环模式' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '循环模式' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '顺序播放' })).toBeTruthy());
   });
 });

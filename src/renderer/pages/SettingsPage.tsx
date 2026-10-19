@@ -1,3 +1,5 @@
+import { StreamingAccountsPanel } from './settings/accounts/StreamingAccountsPanel';
+import { TidalAuthSettings } from './settings/accounts/TidalAuthSettings';
 import { UltraLightSettingsRows } from './settings/components/UltraLightSettingsRows';
 import { lazy, Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
@@ -165,16 +167,8 @@ import {
   summarizeLibraryScanStatuses,
 } from '../utils/libraryScanProgress';
 import {
-  AccountCookieCard,
   NeteaseQrLoginDialog,
-  QobuzAccountCard,
-  SpotifyAccountCard,
-  TidalAccountCard,
-  YouTubeAccountCard,
-  accountProviderLabels,
   buildYouTubeBrowserOptions,
-  getAccountBadgeClass,
-  getAccountStatusLabel,
 } from './settings/components/AccountCards';
 import { FontPickerModal } from './settings/components/FontPickerModal';
 import {
@@ -236,6 +230,7 @@ import {
   dispatchPlaybackSeeked,
   getCompatiblePlaybackDevices,
   getPlaybackOutputModeLabel,
+  getPlaybackRecommendationText,
   getPlaybackOutputModesForPlatform,
   getSharedBackendDescriptionKey,
   getSharedBackendOptionsForPlatform,
@@ -278,7 +273,7 @@ import {
   formatUpdateBytes,
   getDatabaseHealthLabel,
 } from './settings/diagnostics/settingsDiagnosticsFormat';
-import { accountLoginUrls, accountProviderLogoUrls, cookieAccountProviders, resetEchoProDisplayStatusSnapshotForTests, settingsAccountProviders } from './settings/accounts/accountSettingsModel';
+import { accountLoginUrls, resetEchoProDisplayStatusSnapshotForTests, settingsAccountProviders } from './settings/accounts/accountSettingsModel';
 
 import {
   fallbackFontFamilies,
@@ -644,6 +639,9 @@ export const SettingsPage = (): JSX.Element => {
   const [onlineAlbumInfoBusyAction, setOnlineAlbumInfoBusyAction] = useState<'save' | null>(null);
   const [onlineAlbumInfoMessage, setOnlineAlbumInfoMessage] = useState<string | null>(null);
   const [selectedAccountProvider, setSelectedAccountProvider] = useState<AccountProvider>('netease');
+  useEffect(() => {
+    if (highlightedSettingId === 'settings-row-bilibili-account') setSelectedAccountProvider('bilibili');
+  }, [highlightedSettingId]);
   const [credentialPanelExpanded, setCredentialPanelExpanded] = useState(() =>
     readBooleanStoragePreference(integrationsCredentialPanelExpandedStorageKey, false),
   );
@@ -780,6 +778,15 @@ export const SettingsPage = (): JSX.Element => {
       description: string;
       terms: string[];
     }> = [
+      {
+        id: 'row-settings-optional-sections',
+        sectionKey: 'advancedCustom',
+        targetId: 'settings-row-settings-optional-sections',
+        title: t('settings.general.settingsOptionalSections.title'),
+        description: t('settings.general.settingsOptionalSections.description'),
+        terms: [t('settings.general.settingsOptionalSections.title'), t('settings.general.settingsOptionalSections.description'),
+          ...(settingsSearchAliases.plugins ?? []), ...(settingsSearchAliases.remote ?? []), ...(settingsSearchAliases.eq ?? [])],
+      },
       {
         id: 'row-first-run-wizard',
         sectionKey: 'general',
@@ -1997,6 +2004,10 @@ export const SettingsPage = (): JSX.Element => {
     ];
 
     const entries = [...rowEntries, ...sectionEntries].filter((entry) => {
+      if (visibleSectionKeys.has('eq') && entry.targetId === 'settings-row-settings-optional-sections') {
+        return false;
+      }
+
       if (!mysteriousKeyVisible && entry.targetId === 'settings-row-mysterious-key') {
         return false;
       }
@@ -9600,7 +9611,6 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   />
                 </div>
               </SettingRow>
-              <SettingSubsectionTitle {...getSettingsSubsection('advancedPerformance')} />
               <SettingSubsectionTitle {...getSettingsSubsection('advancedVisuals')} />
               <SettingRow
                 id="settings-row-remember-window-size"
@@ -9774,20 +9784,20 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               >
                 <div className="settings-playback-recommended-path" role="list">
                   <span role="listitem">
-                    <strong>{t('settings.playback.recommendedPath.shared.title')}</strong>
+                    <strong>{getPlaybackRecommendationText('settings.playback.recommendedPath.shared.title', t, rendererPlatform)}</strong>
                     <em>{t('settings.playback.recommendedPath.shared.body')}</em>
                   </span>
                   <span role="listitem">
                     <strong>{t('settings.playback.recommendedPath.device.title')}</strong>
-                    <em>{t('settings.playback.recommendedPath.device.body')}</em>
+                    <em>{getPlaybackRecommendationText('settings.playback.recommendedPath.device.body', t, rendererPlatform)}</em>
                   </span>
                   <span role="listitem">
                     <strong>{t('settings.playback.recommendedPath.advanced.title')}</strong>
-                    <em>{t('settings.playback.recommendedPath.advanced.body')}</em>
+                    <em>{getPlaybackRecommendationText('settings.playback.recommendedPath.advanced.body', t, rendererPlatform)}</em>
                   </span>
                 </div>
               </SettingRow>
-              <SettingRow title={t('settings.playback.outputMode.title')} description={t('settings.playback.outputMode.description')}>
+              <SettingRow title={t('settings.playback.outputMode.title')} description={getPlaybackRecommendationText('settings.playback.outputMode.description', t, rendererPlatform)}>
                 <div className="settings-output-mode-control">
                   <div className="settings-chip-row">
                     {playbackOutputModesForPlatform.map((mode) => (
@@ -10913,21 +10923,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
               ) : null}
               {activeSection === 'accounts' ? (
                 <>
-              <div id="settings-row-bilibili-account" data-search-highlight={highlightedSettingId === 'settings-row-bilibili-account' ? 'true' : undefined}>
-                <AccountCookieCard
-                  busyAction={accountBusy.bilibili}
-                  cookieValue={accountCookies.bilibili}
-                  error={accountErrors.bilibili}
-                  message={accountMessages.bilibili}
-                  onChangeCookie={(value) => setAccountCookies((current) => ({ ...current, bilibili: value }))}
-                  onCheck={() => void handleAccountCheck('bilibili')}
-                  onClear={() => void handleAccountClear('bilibili')}
-                  onOpenLogin={() => void handleAccountOpenLogin('bilibili')}
-                  onSave={() => void handleAccountSaveCookie('bilibili')}
-                  provider="bilibili"
-                  status={accountStatusByProvider.bilibili}
-                />
-              </div>
+              <StreamingAccountsPanel {...{ selectedAccountProvider, setSelectedAccountProvider, accountStatusByProvider, accountCookies, setAccountCookies, accountBusy, accountErrors, accountMessages, soundCloudBrowser, youtubeBrowser, qobuzTokenValue, setQobuzTokenValue, handleAccountSaveCookie, handleAccountCheck, handleAccountOpenLogin, handleAccountClear, handleNeteaseQrLogin, handleSoundCloudBrowserChange, handleYouTubeBrowserChange, handleOpenExternalUrl }} />
               <SettingSubsectionTitle {...getSettingsSubsection('integrationsAdvanced')} />
               <div className="settings-credential-panel" data-expanded={credentialPanelVisible}>
                 <header className="settings-credential-panel-header">
@@ -10947,6 +10943,67 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                   </button>
                 </header>
               </div>
+              {credentialPanelVisible ? (
+              <SettingRow
+                className="setting-row--full setting-row--credential"
+                id="settings-row-spotify-auth-config"
+                highlighted={highlightedSettingId === 'settings-row-spotify-auth-config'}
+                title={t('settings.integrations.spotifyAuth.title')}
+                description={t('settings.integrations.spotifyAuth.description')}
+              >
+                <div className="settings-cache-panel settings-cache-panel--bare settings-cache-panel--spotify-auth">
+                  <div className="settings-proxy-grid">
+                    <label className="settings-proxy-field">
+                      <span>Client ID</span>
+                      <input
+                        type="text"
+                        value={spotifyAuthDraft.clientId}
+                        placeholder={t('settings.integrations.spotifyAuth.clientIdPlaceholder')}
+                        disabled={!appSettings}
+                        onChange={(event) => {
+                          setSpotifyAuthDraft((current) => ({ ...current, clientId: event.target.value }));
+                          setSpotifyAuthMessage(null);
+                        }}
+                      />
+                    </label>
+                    <label className="settings-proxy-field">
+                      <span>Redirect URI</span>
+                      <input
+                        type="text"
+                        value={spotifyAuthDraft.redirectUri}
+                        placeholder={defaultSpotifyRedirectUri}
+                        disabled={!appSettings}
+                        onChange={(event) => {
+                          setSpotifyAuthDraft((current) => ({ ...current, redirectUri: event.target.value }));
+                          setSpotifyAuthMessage(null);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="settings-chip-row settings-chip-row--left">
+                    <button className="settings-action-button" type="button" disabled={!appSettings} onClick={handleSpotifyAuthConfigSave}>
+                      <Save size={15} />
+                      {t('settings.integrations.common.saveConfig', { service: 'Spotify' })}
+                    </button>
+                    <button className="settings-action-button" type="button" onClick={() => void handleOpenExternalUrl(spotifyDeveloperDashboardUrl)}>
+                      <ExternalLink size={15} />
+                      {t('settings.integrations.common.openDashboard', { service: 'Spotify' })}
+                    </button>
+                  </div>
+                  <p className="settings-inline-note">
+                    {t('settings.integrations.common.dashboardCallback', { uri: defaultSpotifyRedirectUri })}
+                  </p>
+                  {spotifyAuthMessage ? <p className="settings-inline-note">{spotifyAuthMessage}</p> : null}
+                </div>
+              </SettingRow>
+              ) : null}
+              {credentialPanelVisible ? <TidalAuthSettings
+                draft={tidalAuthDraft} message={tidalAuthMessage} disabled={!appSettings}
+                onChange={(patch) => { setTidalAuthDraft((current) => ({ ...current, ...patch })); setTidalAuthMessage(null); }}
+                onSave={handleTidalAuthConfigSave}
+                onOpenDashboard={() => void handleOpenExternalUrl(tidalDeveloperDashboardUrl)}
+                defaultRedirectUri={defaultTidalRedirectUri}
+              /> : null}
               {credentialPanelVisible ? <SettingSubsectionTitle {...getSettingsSubsection('integrationsMetadata')} /> : null}
               {credentialPanelVisible ? (
               <SettingRow
@@ -12507,6 +12564,7 @@ const handleNativeDirectLocalPlaybackToggle = async (): Promise<void> => {
                 onDiscardQuarantinedTracks={() => void handleDiscardQuarantinedProblemTracks()}
                 onExportDiagnostics={() => void handleDiagnosticsExport()}
                 onOpenFolder={() => void handleOpenDataProtectionFolder()}
+                onOpenDataProtectionSettings={() => jumpToSettingsSection('advancedCustom', { targetId: 'settings-row-data-protection-disabled' })}
                 onPrimaryRecovery={() => void handleDatabasePrimaryRecoveryAction()}
                 onRefresh={() => void handleRefreshDatabaseProtectionStatus()}
                 onRelaunchRecovery={() => void handleRelaunchLibraryRecoveryMode()}

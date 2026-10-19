@@ -37,9 +37,6 @@ export const settingsSubsectionCopy = {
   advancedInterface: {
     title: { 'zh-CN': '界面与操作密度', 'zh-TW': '介面與操作密度', 'ja-JP': '画面と操作密度', 'en-US': 'Interface And Interaction Density', 'ko-KR': '인터페이스 및 조작 밀도' },
   },
-  advancedPerformance: {
-    title: { 'zh-CN': '扫描与资源策略', 'zh-TW': '掃描與資源策略', 'ja-JP': 'スキャンとリソース方針', 'en-US': 'Scan And Resource Strategy', 'ko-KR': '스캔 및 리소스 전략' },
-  },
   advancedVisuals: {
     title: { 'zh-CN': '窗口、可视化与图形保护', 'zh-TW': '視窗、視覺化與圖形保護', 'ja-JP': 'ウィンドウ、可視化、描画保護', 'en-US': 'Window, Visuals, And Graphics Protection', 'ko-KR': '창, 시각 효과 및 그래픽 보호' },
   },

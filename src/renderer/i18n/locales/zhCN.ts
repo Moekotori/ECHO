@@ -1,3 +1,5 @@
+import { libraryPageParityZhCN } from './libraryPageParityFamily';
+import { communityLibraryZhCNMessages } from './communityLibraryFamily';
 import type { TranslationKey, TranslationMap } from '../locales';
 import { albumSplitZhCNMessages } from './albumSplitFamily';
 import { likedPageZhCN, mediaLibraryZhCN, settingsAboutDangerZhCN, settingsIntegrationsExtraZhCN, songsPageZhCN } from './zhFamily';
@@ -148,6 +150,7 @@ const audioSignalPathExtrasZhCN = {
 };
 
 export const zhCN: TranslationMap = {
+  ...communityLibraryZhCNMessages,
   'common.skipToContent': '跳到主要内容',
   'userNotice.action.accept': '我已阅读并同意',
   'userNotice.action.communityBoundaries': '社区边界',
@@ -2819,8 +2822,8 @@ export const zhCN: TranslationMap = {
   'songs.filter.button': '筛选',
   'songs.filter.menuAria': '歌曲筛选',
   'songs.filter.section': '筛选',
-  'songs.filter.audioFormat': '采样率 / DSD',
-  'songs.filter.audioFormat.all': '全部格式',
+  'songs.filter.audioFormat': '音频格式',
+  'songs.filter.audioFormat.all': '不限格式',
   'songs.filter.audioFormat.sampleRate44100': '44.1 kHz',
   'songs.filter.audioFormat.sampleRate48000': '48 kHz',
   'songs.filter.audioFormat.sampleRate88200': '88.2 kHz',
@@ -3546,7 +3549,7 @@ export const zhCN: TranslationMap = {
   'settings.integrations.accounts.status.expired': '登录失效',
   'settings.integrations.accounts.status.loggedIn': '已登录',
   'settings.integrations.accounts.status.loggedOut': '未登录',
-  'settings.integrations.accounts.description.default': '歌词、元数据和下载接入预留。',
+  'settings.integrations.accounts.description.default': '登录账号以使用流媒体歌单、在线播放和曲库信息服务。',
   'settings.integrations.accounts.description.bilibili': '用于 MV 解析和高清画质。',
   'settings.integrations.accounts.loginAndSync': '登录并同步',
   'settings.integrations.accounts.clickToLogin': '未登录，点此登录',
@@ -5124,6 +5127,46 @@ export const zhCN: TranslationMap = {
   'settings.remote.ux.browser.coverLabel': '封面 {status}',
   'settings.remote.ux.browser.lyricsLabel': '歌词 {status}',
   'settings.remote.ux.issue.view': '查看{kind}问题',
+  'songs.filter.folder': '文件夹',
+  'songs.filter.folder.empty': '暂无已导入文件夹',
+  'songs.filter.folder.loading': '正在加载文件夹…',
+  'songs.filter.reset': '重置',
+  'songs.search.empty': '没有符合当前搜索的曲目',
+  'songs.sort.albumDesc': '专辑 Z-A',
+  'songs.sort.artistDesc': '艺术家 Z-A',
+  'songs.sort.bitrateAsc': '码率（低到高）',
+  'songs.sort.bitrateDesc': '码率（高到低）',
+  'songs.sort.codecAsc': '编码（A-Z）',
+  'songs.sort.codecDesc': '编码（Z-A）',
+  'songs.sort.multi.hint': '按选择顺序决定优先级',
+  'songs.sort.multi.label': '多选排序',
+  'songs.sort.multiCount': '{count} 项排序',
+  'songs.filter.activeCount': '{count} 个条件',
+  'songs.filter.audioFormat.aac': 'AAC',
+  'songs.filter.audioFormat.aiff': 'AIFF',
+  'songs.filter.audioFormat.alac': 'ALAC',
+  'songs.filter.audioFormat.flac': 'FLAC',
+  'songs.filter.audioFormat.mp3': 'MP3',
+  'songs.filter.audioFormat.ogg': 'Ogg Vorbis',
+  'songs.filter.audioFormat.opus': 'Opus',
+  'songs.filter.audioFormat.other': '其他格式',
+  'songs.filter.audioFormat.wav': 'WAV',
+  'songs.filter.condition': '条件',
+  'songs.filter.condition.all': '全部歌曲',
+  'songs.filter.folder.all': '全部文件夹',
+  'songs.filter.genre': '流派',
+  'songs.filter.genre.all': '不限流派',
+  'songs.filter.genre.aria': '按流派筛选',
+  'songs.filter.hint': '可同时组合多个条件',
+  'songs.filter.sampleRate': '采样率',
+  'songs.filter.sampleRate.all': '不限采样率',
+  'songs.filter.sampleRate.group.hiRes': 'Hi-Res',
+  'songs.filter.sampleRate.group.other': '其他',
+  'songs.filter.sampleRate.group.standard': '标准',
+  'songs.filter.year': '年份',
+  'songs.filter.year.all': '不限年份',
+  'songs.filter.year.aria': '按发行年份筛选',
+  ...libraryPageParityZhCN,
 };
 
 export default zhCN;

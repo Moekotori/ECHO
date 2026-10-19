@@ -7,6 +7,7 @@ import type { AudioStatus, PlaybackSpeedMode } from '../../../shared/types/audio
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 
 type PlayerSpeedControlProps = {
+  embedded?: boolean;
   status: AudioStatus | null;
   onStatusChange: (status: AudioStatus) => void;
   onError: (message: string) => void;
@@ -52,6 +53,7 @@ const withCommittedSpeedStatus = (
     : { ...status, playbackRate, playbackSpeedMode };
 
 export const PlayerSpeedControl = ({
+  embedded = false,
   status,
   onStatusChange,
   onError,
@@ -216,7 +218,7 @@ export const PlayerSpeedControl = ({
   }, [onStatusChange]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || embedded) {
       return undefined;
     }
 
@@ -249,7 +251,7 @@ export const PlayerSpeedControl = ({
       window.removeEventListener('pointermove', handlePointerMove, true);
       window.removeEventListener('pointerdown', handlePointerDown, true);
     };
-  }, [isOpen, onOpenChange]);
+  }, [embedded, isOpen, onOpenChange]);
 
   const commitSpeed = useCallback(
     async (nextPlaybackRate: number): Promise<void> => {
@@ -301,8 +303,8 @@ export const PlayerSpeedControl = ({
   };
 
   return (
-    <div className="speed-control" ref={rootRef} onMouseEnter={() => onOpenChange(true)} onWheel={handleWheel}>
-      <button
+    <div className="speed-control" ref={rootRef} data-embedded={embedded || undefined} onMouseEnter={embedded ? undefined : () => onOpenChange(true)} onWheel={handleWheel}>
+      {!embedded ? <button
         className="icon-button"
         type="button"
         aria-label={t('playerSpeed.label')}
@@ -311,11 +313,12 @@ export const PlayerSpeedControl = ({
         onFocus={() => onOpenChange(true)}
       >
         <Gauge size={17} />
-      </button>
-      {shouldRenderPopover ? (
-        <div className="speed-popover control-popover" data-open={isPopoverVisible} ref={popoverRef}>
+      </button> : null}
+      {embedded || shouldRenderPopover ? (
+        <div className="speed-popover control-popover" data-open={embedded || isPopoverVisible} ref={popoverRef}>
           <div className="control-popover-header speed-popover-header">
             <span className="control-popover-readout">
+              {embedded ? <span className="player-utility-field-label">{t('playerSpeed.label')}</span> : null}
               <span className="control-popover-value">{formatSpeed(playbackRate)}</span>
             </span>
             <button
