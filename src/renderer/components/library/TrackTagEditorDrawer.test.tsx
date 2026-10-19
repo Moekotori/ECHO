@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TrackTagEditorDrawer, applyNetworkCandidateToForm, defaultNetworkFieldSelection } from './TrackTagEditorDrawer';
 import type { LibraryTrack, NetworkTagCandidate } from '../../../shared/types/library';
 import type { LyricsSearchCandidate, TrackLyrics } from '../../../shared/types/lyrics';
@@ -136,6 +136,42 @@ afterEach(() => {
 });
 
 describe('TrackTagEditorDrawer network tags', () => {
+  it('does not let a late initial lyrics read overwrite a saved edit', async () => {
+    let finishRead!: (value: TrackLyrics) => void;
+    installEcho(vi.fn(), {
+      getForTrack: vi.fn(() => new Promise<TrackLyrics>((resolve) => { finishRead = resolve; })),
+      applyCustomLrc: vi.fn().mockResolvedValue(trackLyrics({ lines: [{ timeMs: 2000, text: 'Saved edit' }], syncedText: '[00:02.00]Saved edit' })),
+    });
+    render(<TrackTagEditorDrawer track={track()} isOpen isSaving={false} error={null} onClose={vi.fn()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: '歌词' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑歌词' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '歌词文本' }), { target: { value: '[00:02.00]Saved edit' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存到歌词库' }));
+    await screen.findByText('[00:02.00] Saved edit');
+    await act(async () => finishRead(trackLyrics({ lines: [{ timeMs: 1000, text: 'Old read' }] })));
+    expect(screen.queryByText('[00:01.00] Old read')).toBeNull();
+    expect(screen.getByText('[00:02.00] Saved edit')).toBeTruthy();
+  });
+  it('keeps lyrics drafts across tabs, guards close, and saves only to the lyrics library', async () => {
+    installEcho(vi.fn(), { getForTrack: vi.fn().mockResolvedValue(trackLyrics()) });
+    const close = vi.fn();
+    render(<TrackTagEditorDrawer track={track()} isOpen isSaving={false} error={null} onClose={close} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: '歌词' }));
+    await waitFor(() => expect(screen.getByText('[00:01.00] Line')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '编辑歌词' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '歌词文本' }), { target: { value: '[00:02.00]Edited' } });
+    fireEvent.click(screen.getByRole('tab', { name: '标签' }));
+    fireEvent.click(screen.getByRole('tab', { name: '歌词' }));
+    expect((screen.getByRole('textbox', { name: '歌词文本' }) as HTMLTextAreaElement).value).toBe('[00:02.00]Edited');
+    fireEvent.click(screen.getAllByRole('button', { name: '关闭编辑标签' })[0]);
+    expect(screen.getByText('有未保存更改，确认关闭并丢弃吗？')).toBeTruthy();
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存到歌词库' }));
+    await waitFor(() => expect(window.echo.lyrics.applyCustomLrc).toHaveBeenCalledWith('track-1', '[00:02.00]Edited', undefined));
+    expect(window.echo.lyrics.embedToTrack).not.toHaveBeenCalled();
+    expect(window.echo.library.updateTrackTags).not.toHaveBeenCalled();
+  });
   it('defaults empty fields to checked while keeping existing fields untouched at normal confidence', () => {
     const form = {
       title: 'Local Song',

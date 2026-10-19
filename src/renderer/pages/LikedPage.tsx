@@ -213,6 +213,7 @@ const itemToAlbum = (item: LibraryPlaylistItem, t: I18nT): LibraryAlbum => {
 
 export const LikedPage = (): JSX.Element => {
   const { t } = useI18n();
+  const streamingAvailable = window.echo?.streaming != null;
   const [tab, setTab] = useState<LikedTab>("tracks");
   const [trackItems, setTrackItems] = useState<LibraryPlaylistItem[]>([]);
   const [albumItems, setAlbumItems] = useState<LibraryPlaylistItem[]>([]);
@@ -282,8 +283,11 @@ export const LikedPage = (): JSX.Element => {
   );
   const likedSyncProviderOptions = useMemo(
     () =>
-      likedSyncProviders.map((item) => ({ ...item, label: t(item.labelKey) })),
-    [t],
+      (streamingAvailable ? likedSyncProviders : []).map((item) => ({
+        ...item,
+        label: t(item.labelKey),
+      })),
+    [streamingAvailable, t],
   );
   const getLikedTrackSourceLabel = useCallback(
     (provider: LikedTrackSourceProvider): string =>
@@ -399,7 +403,9 @@ export const LikedPage = (): JSX.Element => {
             pageSize,
             search,
             sort: trackSort,
-            ...(sourceProvider === "all" ? {} : { sourceProvider }),
+            ...(!streamingAvailable
+              ? { sourceProvider: "local" as const }
+              : sourceProvider === "all" ? {} : { sourceProvider }),
           });
 
         if (trackRequestIdRef.current !== requestId) {
@@ -427,7 +433,7 @@ export const LikedPage = (): JSX.Element => {
         }
       }
     },
-    [search, trackSort],
+    [search, streamingAvailable, trackSort],
   );
 
   const refreshSourceTotals = useCallback(async (): Promise<void> => {
@@ -437,17 +443,16 @@ export const LikedPage = (): JSX.Element => {
     }
 
     try {
-      const providers: Array<Exclude<LikedTrackSourceProvider, "all">> = [
-        "local",
-        "netease",
-        "qqmusic",
-      ];
+      const providers: Array<Exclude<LikedTrackSourceProvider, "all">> = streamingAvailable
+        ? ["local", "netease", "qqmusic"]
+        : ["local"];
       const [allResult, ...providerResults] = await Promise.all([
         library.getLikedTracks({
           page: 1,
           pageSize: 1,
           search: "",
           sort: "recent",
+          ...(!streamingAvailable ? { sourceProvider: "local" as const } : {}),
         }),
         ...providers.map((sourceProvider) =>
           library.getLikedTracks({
@@ -471,7 +476,7 @@ export const LikedPage = (): JSX.Element => {
     } catch {
       // Keep the last known counts; the main list still remains usable.
     }
-  }, []);
+  }, [streamingAvailable]);
 
   const loadAlbums = useCallback(
     async (nextPage: number, mode: "replace" | "append"): Promise<void> => {
@@ -617,8 +622,9 @@ export const LikedPage = (): JSX.Element => {
             pageSize: 500,
             search,
             sort: trackSort,
-            ...(trackSourceProvider === "all"
-              ? {}
+            ...(!streamingAvailable
+              ? { sourceProvider: "local" as const }
+              : trackSourceProvider === "all" ? {}
               : { sourceProvider: trackSourceProvider }),
           });
           collected.push(...result.items);
@@ -656,6 +662,7 @@ export const LikedPage = (): JSX.Element => {
     likedQueueSource,
     playTrack,
     search,
+    streamingAvailable,
     t,
     trackItems,
     trackSort,
@@ -915,8 +922,9 @@ export const LikedPage = (): JSX.Element => {
       const exportedPath = await library.exportPlaylist({
         playlistId: playlist.id,
         format: likedExportFormat,
-        ...(trackSourceProvider === "all"
-          ? {}
+        ...(!streamingAvailable
+          ? { sourceProvider: "local" as const }
+          : trackSourceProvider === "all" ? {}
           : { sourceProvider: trackSourceProvider }),
       });
       const sourceLabel = getLikedTrackSourceLabel(trackSourceProvider);
@@ -938,7 +946,7 @@ export const LikedPage = (): JSX.Element => {
     } finally {
       setIsExportingLikedTracks(false);
     }
-  }, [getLikedTrackSourceLabel, likedExportFormat, t, trackSourceProvider]);
+  }, [getLikedTrackSourceLabel, likedExportFormat, streamingAvailable, t, trackSourceProvider]);
 
   const handleToggleAlbumLiked = useCallback(
     async (album: LibraryAlbum): Promise<void> => {
@@ -1303,7 +1311,7 @@ export const LikedPage = (): JSX.Element => {
                   <FolderHeart size={43} strokeWidth={1.45} />
                 </div>
                 <h2>{t("likedPage.empty.tracks.welcomeHeading")}</h2>
-                <p>{t("likedPage.empty.tracks.welcomeDescription")}</p>
+                <p>{t(streamingAvailable ? "likedPage.empty.tracks.welcomeDescription" : "likedPage.empty.description")}</p>
                 <div className="liked-empty-actions">
                   <button
                     className="liked-empty-primary"
@@ -1312,13 +1320,13 @@ export const LikedPage = (): JSX.Element => {
                   >
                     {t("likedPage.empty.browseLocal")}
                   </button>
-                  <button
+                  {streamingAvailable ? <button
                     className="liked-empty-secondary"
                     type="button"
                     onClick={() => navigateToRoute("streaming")}
                   >
                     {t("likedPage.empty.import")}
-                  </button>
+                  </button> : null}
                 </div>
               </div>
               <div className="liked-empty-sources">

@@ -473,6 +473,7 @@ export type EchoApi = {
     getAlbumSplitStatus: (jobId: string) => Promise<AlbumSplitJobStatus | null>;
     cancelAlbumSplit: (jobId: string) => Promise<AlbumSplitJobStatus | null>;
     getFolders: () => Promise<LibraryFolder[]>;
+    getSongFilterGenres: (source: 'local' | 'remote') => Promise<string[]>;
     getFolderOverviews: () => Promise<LibraryFolderOverview[]>;
     getFolderChildren: (query: LibraryFolderChildrenQuery) => Promise<LibraryFolderNode[]>;
     getFolderTracks: (query: LibraryFolderTracksQuery) => Promise<LibraryPage<LibraryTrack>>;
@@ -760,7 +761,7 @@ export type EchoApi = {
       eventClients: number;
     }>;
   };
-  /** @deprecated Removed in 26.10.3; retained for legacy renderer data compatibility only. */
+  /** Playlist import and online playback capabilities. */
   streaming?: {
     search: (request: StreamingSearchRequest) => Promise<StreamingSearchResult>;
     getTrack: (request: { provider: StreamingProviderName; providerTrackId: string }) => Promise<StreamingTrack>;
@@ -923,6 +924,7 @@ export type EchoApi = {
     getLogs: (pluginId?: string) => Promise<PluginLogEntry[]>;
   };
   accounts?: {
+    loginQobuz?: (credentials: import('../shared/types/qobuz').QobuzManualCredentials) => Promise<import('../shared/types/qobuz').QobuzLoginResult>;
     getStatuses: () => Promise<AccountStatus[]>;
     getStatus: (provider: AccountProvider) => Promise<AccountStatus>;
     saveCookie: (provider: AccountProvider, cookie: string) => Promise<AccountStatus>;
@@ -936,7 +938,7 @@ export type EchoApi = {
     setYouTubeBrowser?: (browser: YouTubeBrowser) => Promise<AccountStatus>;
     onStatusesChanged: (handler: (statuses: AccountStatus[]) => void) => () => void;
   };
-  /** @deprecated Removed in 26.10.3; never exposed by the desktop preload. */
+  /** Spotify official SDK and Connect playback. */
   spotify?: {
     getAccessToken: () => Promise<string>;
     getDevices: () => Promise<Array<{ id: string; name: string; type: string; isActive: boolean; isRestricted: boolean; volumePercent: number | null }>>;
@@ -1038,7 +1040,7 @@ export type EchoApi = {
 
 // Make every supported namespace mandatory at the actual exposure boundary.
 // Compatibility declarations above must never turn into phantom desktop APIs.
-export type RemovedDesktopNamespace = 'streaming' | 'downloads' | 'spotify';
+export type RemovedDesktopNamespace = 'downloads';
 export type DesktopEchoApi = {
   [Key in Exclude<keyof EchoApi, RemovedDesktopNamespace>]-?: NonNullable<EchoApi[Key]>;
 } & { [Key in RemovedDesktopNamespace]?: never };

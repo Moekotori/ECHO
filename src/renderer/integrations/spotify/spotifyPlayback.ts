@@ -6,7 +6,7 @@ import { translateStatic } from '../../i18n/translateStatic';
 const requireSpotifyApi = (): NonNullable<EchoApi['spotify']> => {
   const api = window.echo.spotify;
   if (!api) {
-    throw new Error('账号登录已移除。');
+    throw new Error(translateStatic('error.bridge.spotify'));
   }
   return api;
 };

@@ -45,6 +45,7 @@ type WorkerSlot = {
 export type WorkerBackedLibraryScanOptions = {
   workerCount?: number;
   taskTimeoutMs?: number;
+  idleTimeoutMs?: number;
   workerFactory?: WorkerFactory;
   workerUrl?: URL;
   identityWorkerUrl?: URL;
@@ -52,6 +53,7 @@ export type WorkerBackedLibraryScanOptions = {
 };
 
 const defaultTaskTimeoutMs = 120_000;
+export const scanWorkerIdleTimeoutMs = 30_000;
 const defaultWorkerUrl = new URL('./libraryScanWorkerHost.js', import.meta.url);
 const defaultIdentityWorkerUrl = new URL('./libraryIdentityWorkerHost.js', import.meta.url);
 const defaultSearchWorkerUrl = new URL('./librarySearchWorkerHost.js', import.meta.url);
@@ -70,6 +72,8 @@ const toError = (error: unknown): Error => error instanceof Error ? error : new 
 class LibraryScanWorkerPool {
   private readonly workerCount: number;
   private readonly taskTimeoutMs: number;
+  private readonly idleTimeoutMs: number;
+  private idleTimer: NodeJS.Timeout | null = null;
   private readonly workerFactory: WorkerFactory;
   private readonly workerUrl: URL;
   private readonly workers: WorkerSlot[] = [];
@@ -81,6 +85,7 @@ class LibraryScanWorkerPool {
 
   constructor(options: WorkerBackedLibraryScanOptions = {}) {
     this.workerCount = normalizeWorkerCount(options.workerCount);
+    this.idleTimeoutMs = Math.max(0, Math.round(options.idleTimeoutMs ?? scanWorkerIdleTimeoutMs));
     this.taskTimeoutMs = Math.max(1_000, Math.round(options.taskTimeoutMs ?? defaultTaskTimeoutMs));
     this.workerFactory = options.workerFactory ?? ((source, workerOptions) => new Worker(source, workerOptions) as WorkerLike);
     this.workerUrl = options.workerUrl ?? defaultWorkerUrl;
@@ -100,6 +105,7 @@ class LibraryScanWorkerPool {
       return Promise.reject(this.startupError);
     }
 
+    this.cancelIdleShutdown();
     return new Promise((resolve, reject) => {
       this.queue.push({
         request: {
@@ -121,6 +127,7 @@ class LibraryScanWorkerPool {
     }
 
     this.closed = true;
+    this.cancelIdleShutdown();
     const closeError = new Error('Library scan worker pool is closed');
     for (const task of this.queue.splice(0)) {
       task.reject(closeError);
@@ -193,7 +200,7 @@ class LibraryScanWorkerPool {
 
       const task = this.queue.shift();
       if (!task) {
-        return;
+        break;
       }
 
       slot.currentTask = task;
@@ -207,9 +214,33 @@ class LibraryScanWorkerPool {
         this.retireWorker(slot, toError(error));
       }
     }
+    this.scheduleIdleShutdown();
+  }
+
+  private cancelIdleShutdown(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private scheduleIdleShutdown(): void {
+    this.cancelIdleShutdown();
+    if (!this.idleTimeoutMs || this.closed || this.queue.length > 0 ||
+      this.workers.length === 0 || this.workers.some(slot => slot.currentTask !== null)) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.closed || this.queue.length > 0 || this.workers.some(slot => slot.currentTask !== null)) return;
+      // Mark all owners retired before termination: late exit/message events must
+      // not respawn an idle pool or settle a request belonging to a new generation.
+      const idle = this.workers.splice(0);
+      this.started = false;
+      for (const slot of idle) slot.retired = true;
+      for (const slot of idle) void Promise.resolve(slot.worker.terminate()).catch(() => undefined);
+    }, this.idleTimeoutMs);
+    this.idleTimer.unref?.();
   }
 
   private handleWorkerMessage(slot: WorkerSlot, message: LibraryScanWorkerResponse): void {
+    if (slot.retired) return;
     const task = slot.currentTask;
     if (!task || task.request.requestId !== message.requestId) {
       return;

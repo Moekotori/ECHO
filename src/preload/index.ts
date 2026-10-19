@@ -1,3 +1,5 @@
+import { createSpotifyApi } from './ipc/ipcSpotify';
+import { createStreamingApi } from './ipc/streamingApi';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IpcChannels } from '../shared/constants/ipcChannels';
 import { createSystemAudioEngine, type AutomixAdvancePayload } from './systemAudioEngine';
@@ -36,6 +38,8 @@ ipcRenderer.on(IpcChannels.PlaybackAutomixAdvance, (_e, p) => {
 });
 const deps: PlaybackDeps = { localAudioFileOpenHandlers: localFileHandlers, pendingLocalAudioFileOpenEvents: pendingLocalFiles, automixAdvanceHandlers: automixHandlers, mainWindowControlHandlers, isMainPlaybackRenderer: isMain, invokeMainPlaybackRenderer: invokeMain };
 const echoApi: DesktopEchoApi = {
+  spotify: createSpotifyApi(ipcRenderer, IpcChannels),
+  streaming: createStreamingApi(ipcRenderer, IpcChannels),
   app: createAppApi(ipcRenderer, IpcChannels), desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
   miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels), pet: createPetApi(ipcRenderer, IpcChannels), library: createLibraryApi(ipcRenderer, IpcChannels, webUtils),
   taskbarMiniPlayer: {

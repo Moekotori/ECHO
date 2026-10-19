@@ -240,6 +240,20 @@ afterEach(() => {
 });
 
 describe('HistoryPage', () => {
+  it('applies a custom date range to records and summaries together with completed filtering', async () => {
+    await loadTranslations('en-US');
+    const library = installLibraryMock();
+    renderHistoryPage();
+    await waitFor(() => expect(library.getPlaybackHistory).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Custom dates' }));
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-07' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply dates' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Completed plays only' }));
+    const expected = { from: new Date(2026, 9, 1).toISOString(), to: new Date(2026, 9, 8).toISOString(), completedOnly: true };
+    await waitFor(() => expect(library.getPlaybackHistory).toHaveBeenCalledWith(expect.objectContaining(expected)));
+    expect(library.getPlaybackHistorySummary).toHaveBeenCalledWith(expect.objectContaining(expected));
+  });
   it('refreshes visible history after records change and removes the listener on unmount', async () => {
     await loadTranslations('en-US');
     let entries = [historyEntry('before-change')];

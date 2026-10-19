@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouteActivity } from '../components/ui/RouteActivityContext';
 import type { RemoteCoverLoadPerformanceMode, AppSettings } from '../../shared/types/appSettings';
 import type { LibraryTrack } from '../../shared/types/library';
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
@@ -196,6 +197,7 @@ export const useRemoteCoverPreloader = ({
   visibleTrackIds,
   hydrateMissingCovers,
 }: RemoteCoverPreloaderOptions): RemoteCoverLoadPerformanceMode => {
+  const isRouteActive = useRouteActivity();
   const mode = useRemoteCoverLoadPerformanceMode();
   const visibleTrackIdsKey = useMemo(() => visibleTrackIds.join('\0'), [visibleTrackIds]);
   const previousModeRef = useRef(mode);
@@ -208,7 +210,7 @@ export const useRemoteCoverPreloader = ({
   }, [mode]);
 
   useEffect(() => {
-    if (!active || tracks.length === 0) {
+    if (!active || !isRouteActive || tracks.length === 0) {
       return undefined;
     }
 
@@ -284,7 +286,7 @@ export const useRemoteCoverPreloader = ({
       }
       activeImages.clear();
     };
-  }, [active, hydrateMissingCovers, mode, tracks, visibleTrackIds, visibleTrackIdsKey]);
+  }, [active, hydrateMissingCovers, isRouteActive, mode, tracks, visibleTrackIds, visibleTrackIdsKey]);
 
   return mode;
 };

@@ -1,8 +1,18 @@
-import { BrowserWindow, ipcMain } from 'electron';
+import { QobuzAuthService } from '../qobuz/QobuzAuthService';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import { IpcChannels } from '../../shared/constants/ipcChannels';
-import type { AccountLoginStartResult, AccountProvider, AccountStatus } from '../../shared/types/accounts';
-import { getAccountService, isAccountProvider } from '../accounts/AccountService';
+import type {
+  AccountLoginStartResult,
+  AccountProvider,
+  AccountStatus,
+  NeteaseQrLoginPollResult,
+  NeteaseQrLoginStartResult,
+} from '../../shared/types/accounts';
+import { getAccountService, isAccountBrowser, isAccountProvider, isYouTubeBrowser } from '../accounts/AccountService';
 import { startAccountLoginWindow } from '../accounts/AccountLoginWindow';
+import { getNeteaseQrLoginService } from '../accounts/NeteaseQrLoginService';
+import { getSpotifyAuthService } from '../accounts/SpotifyAuthService';
+import { getTidalAuthService } from '../accounts/TidalAuthService';
 
 const requireProvider = (value: unknown): AccountProvider => {
   if (!isAccountProvider(value)) {
@@ -20,18 +30,61 @@ const requireCookie = (value: unknown): string => {
   return value;
 };
 
+const requireLoginKey = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('NetEase QR login key is required.');
+  }
+
+  return value;
+};
+
 const sendAccountStatusesChanged = (): void => {
   const statuses = getAccountService().getStatuses();
   for (const window of BrowserWindow.getAllWindows()) {
     try {
       window.webContents.send(IpcChannels.AccountStatusesChanged, statuses);
     } catch {
-      // Ignore windows that are closing while login finishes.
+      // Ignore windows that are closing while login polling finishes.
     }
   }
 };
 
+const openSystemBrowserAccount = async (provider: Extract<AccountProvider, 'youtube' | 'soundcloud'>): Promise<AccountLoginStartResult> => {
+  const credentials = getAccountService().getCredentials(provider);
+  const browser = credentials.browser;
+  const url = provider === 'youtube' ? 'https://www.youtube.com/' : 'https://soundcloud.com/';
+  const loginUrl = browser === 'edge' && process.platform === 'win32'
+    ? `microsoft-edge:${url}`
+    : url;
+
+  await shell.openExternal(loginUrl).catch(() => undefined);
+  return {
+    status: getAccountService().getStatus(provider),
+    saved: false,
+    message: provider === 'youtube'
+      ? 'Opened YouTube in the system browser. ECHO will not open an Electron login window for YouTube.'
+      : 'Opened SoundCloud in the system browser. ECHO will reuse the selected browser login through yt-dlp.',
+  };
+};
+
 export const registerAccountIpc = (): void => {
+  ipcMain.handle(IpcChannels.AccountLoginQobuz, async (_event, credentials: unknown) => {
+    if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) throw new Error('无效的 Qobuz 凭据');
+    const input = credentials as Record<string, unknown>;
+    if (typeof input.userAuthToken !== 'string' || !input.userAuthToken.trim()) throw new Error('请输入 user_auth_token');
+    const auth = QobuzAuthService.getInstance();
+    const result = await auth.loginWithToken({
+      userAuthToken: input.userAuthToken.trim(),
+      appId: typeof input.appId === 'string' ? input.appId : undefined,
+      appSecret: typeof input.appSecret === 'string' ? input.appSecret : undefined,
+    });
+    if (result.success) {
+      const record = auth.toStoredRecord();
+      getAccountService().saveQobuzCredentials({ ...record, accessToken: record.accessToken ?? '' });
+      sendAccountStatusesChanged();
+    }
+    return result;
+  });
   ipcMain.handle(IpcChannels.AccountGetStatuses, (): AccountStatus[] => getAccountService().getStatuses());
   ipcMain.handle(IpcChannels.AccountGetStatus, (_event, provider: unknown): AccountStatus =>
     getAccountService().getStatus(requireProvider(provider)),
@@ -42,25 +95,153 @@ export const registerAccountIpc = (): void => {
     return status;
   });
   ipcMain.handle(IpcChannels.AccountStartLogin, async (_event, provider: unknown): Promise<AccountLoginStartResult> => {
-    const result = await startAccountLoginWindow(requireProvider(provider), getAccountService());
+    const accountProvider = requireProvider(provider);
+    if (accountProvider === 'spotify') {
+      const result = await getSpotifyAuthService().startLoginWindow();
+      if (result.saved) sendAccountStatusesChanged();
+      return result;
+    }
+    if (accountProvider === 'tidal') {
+      const result = await getTidalAuthService().startLoginWindow();
+      if (result.saved) sendAccountStatusesChanged();
+      return result;
+    }
+    if (accountProvider === 'youtube') {
+      return openSystemBrowserAccount('youtube');
+    }
+    if (accountProvider === 'soundcloud') {
+      return openSystemBrowserAccount('soundcloud');
+    }
+
+    const result = await startAccountLoginWindow(accountProvider, getAccountService());
     if (result.saved) {
       sendAccountStatusesChanged();
     }
     return result;
   });
+  ipcMain.handle(IpcChannels.AccountStartNeteaseQrLogin, (): Promise<NeteaseQrLoginStartResult> =>
+    getNeteaseQrLoginService().startLogin(),
+  );
+  ipcMain.handle(IpcChannels.AccountPollNeteaseQrLogin, async (_event, key: unknown): Promise<NeteaseQrLoginPollResult> => {
+    const result = await getNeteaseQrLoginService().pollLogin(requireLoginKey(key));
+    if (result.status) {
+      sendAccountStatusesChanged();
+    }
+    return result;
+  });
   ipcMain.handle(IpcChannels.AccountClear, (_event, provider: unknown): AccountStatus => {
-    const status = getAccountService().clearAccount(requireProvider(provider));
+    const accountProvider = requireProvider(provider);
+    if (accountProvider === 'qobuz') QobuzAuthService.clearInstanceState();
+    const status = getAccountService().clearAccount(accountProvider);
     sendAccountStatusesChanged();
     return status;
   });
   ipcMain.handle(IpcChannels.AccountCheck, async (_event, provider: unknown): Promise<AccountStatus> => {
-    const status = await getAccountService().checkAccount(requireProvider(provider));
+    const accountProvider = requireProvider(provider);
+    if (accountProvider === 'spotify') {
+      const status = await getSpotifyAuthService().checkAccount();
+      sendAccountStatusesChanged();
+      return status;
+    }
+    if (accountProvider === 'tidal') {
+      const status = await getTidalAuthService().checkAccount();
+      sendAccountStatusesChanged();
+      return status;
+    }
+
+    const status = await getAccountService().checkAccount(accountProvider);
     sendAccountStatusesChanged();
     return status;
   });
   ipcMain.handle(IpcChannels.AccountCheckAll, async (): Promise<AccountStatus[]> => {
-    const statuses = await getAccountService().checkAllAccounts();
+    await getAccountService().checkAllAccounts();
+    if (getAccountService().getStatus('spotify').connected) {
+      await getSpotifyAuthService().checkAccount();
+    }
+    if (getAccountService().getStatus('tidal').connected) {
+      await getTidalAuthService().checkAccount();
+    }
+    const statuses = getAccountService().getStatuses();
     sendAccountStatusesChanged();
     return statuses;
+  });
+  ipcMain.handle(IpcChannels.AccountSetYouTubeBrowser, (_event, browser: unknown): AccountStatus => {
+    if (!isYouTubeBrowser(browser)) {
+      throw new Error('browser must be edge, chrome, firefox, or none');
+    }
+
+    const status = getAccountService().setYouTubeBrowser(browser);
+    sendAccountStatusesChanged();
+    return status;
+  });
+  ipcMain.handle(IpcChannels.AccountSetBrowser, (_event, provider: unknown, browser: unknown): AccountStatus => {
+    const accountProvider = requireProvider(provider);
+    if (accountProvider !== 'youtube' && accountProvider !== 'soundcloud') {
+      throw new Error('provider does not support system browser login');
+    }
+    if (!isAccountBrowser(browser)) {
+      throw new Error('browser must be edge, chrome, firefox, or none');
+    }
+
+    const status = getAccountService().setAccountBrowser(accountProvider, browser);
+    sendAccountStatusesChanged();
+    return status;
+  });
+  ipcMain.handle(IpcChannels.SpotifyGetAccessToken, (): Promise<string> => getSpotifyAuthService().getAccessToken());
+  ipcMain.handle(IpcChannels.SpotifyGetDevices, () => getSpotifyAuthService().getDevices());
+  ipcMain.handle(IpcChannels.SpotifyGetPlaybackState, () => getSpotifyAuthService().getPlaybackState());
+  ipcMain.handle(IpcChannels.SpotifyEnsureConnectDevice, (_event, request: unknown) => {
+    const input = request && typeof request === 'object' ? (request as Record<string, unknown>) : {};
+    const uri = typeof input.uri === 'string' ? input.uri.trim() : '';
+    const webUrl = typeof input.webUrl === 'string' ? input.webUrl.trim() : '';
+    const preferredDeviceId =
+      typeof input.preferredDeviceId === 'string' && input.preferredDeviceId.trim()
+        ? input.preferredDeviceId.trim()
+        : null;
+    if (!uri || !webUrl) {
+      throw new Error('Spotify uri and webUrl are required');
+    }
+
+    return getSpotifyAuthService().ensureConnectDevice({ uri, webUrl, preferredDeviceId });
+  });
+  ipcMain.handle(IpcChannels.SpotifyStartPlayback, (_event, request: unknown): Promise<void> => {
+    const input = request && typeof request === 'object' ? (request as Record<string, unknown>) : {};
+    const deviceId = typeof input.deviceId === 'string' ? input.deviceId.trim() : '';
+    const uri = typeof input.uri === 'string' ? input.uri.trim() : '';
+    const positionMs = typeof input.positionMs === 'number' && Number.isFinite(input.positionMs) ? input.positionMs : undefined;
+    if (!deviceId || !uri) {
+      throw new Error('Spotify deviceId and uri are required');
+    }
+
+    return getSpotifyAuthService().startPlayback({ deviceId, uri, positionMs });
+  });
+  ipcMain.handle(IpcChannels.SpotifyTransferPlayback, (_event, request: unknown): Promise<void> => {
+    const input = request && typeof request === 'object' ? (request as Record<string, unknown>) : {};
+    const deviceId = typeof input.deviceId === 'string' ? input.deviceId.trim() : '';
+    if (!deviceId) {
+      throw new Error('Spotify deviceId is required');
+    }
+
+    return getSpotifyAuthService().transferPlayback({ deviceId, play: input.play === true });
+  });
+  ipcMain.handle(IpcChannels.SpotifyPause, (_event, deviceId: unknown): Promise<void> =>
+    getSpotifyAuthService().pause(typeof deviceId === 'string' ? deviceId : undefined),
+  );
+  ipcMain.handle(IpcChannels.SpotifyResume, (_event, deviceId: unknown): Promise<void> =>
+    getSpotifyAuthService().resume(typeof deviceId === 'string' ? deviceId : undefined),
+  );
+  ipcMain.handle(IpcChannels.SpotifySeek, (_event, positionMs: unknown, deviceId: unknown): Promise<void> => {
+    if (typeof positionMs !== 'number' || !Number.isFinite(positionMs)) {
+      throw new Error('Spotify seek position must be a finite number');
+    }
+
+    return getSpotifyAuthService().seek(positionMs, typeof deviceId === 'string' ? deviceId : undefined);
+  });
+  ipcMain.handle(IpcChannels.SpotifySetVolume, (_event, volume: unknown, deviceId: unknown): Promise<void> => {
+    if (typeof volume !== 'number' || !Number.isFinite(volume)) {
+      throw new Error('Spotify volume must be a finite number');
+    }
+
+    return getSpotifyAuthService().setVolume(volume, typeof deviceId === 'string' ? deviceId : undefined);
   });
 };

@@ -1,0 +1,7 @@
+.history-date-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.history-date-filters .history-filter-tabs { flex-wrap: wrap; }
+.history-completed-filter { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.history-custom-dates { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; width: 100%; }
+.history-custom-dates > label { display: grid; gap: 6px; font-size: 13px; }
+.history-custom-dates input { min-width: 138px; padding: 8px 10px; border: 1px solid var(--theme-panel-border); border-radius: 8px; color: var(--theme-page-text); background: var(--theme-panel-bg); font: inherit; color-scheme: inherit; }
+.history-custom-dates [role='alert'] { color: var(--theme-danger-text, var(--theme-page-text)); }

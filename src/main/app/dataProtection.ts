@@ -204,8 +204,9 @@ type ElectronAppLike = {
   setPath?: (name: ElectronPathName, path: string) => void;
 };
 
-const protectedUserDataFolderName = 'ECHO NEXT';
-const legacyUserDataFolderNames = ['echo-next', 'ECHO Next', 'ECHO'];
+const protectedUserDataFolderName = 'ECHO Community';
+// Community must never auto-import another edition's live library or settings.
+const legacyUserDataFolderNames: readonly string[] = [];
 const dataProtectionDirectoryName = 'data-protection';
 const snapshotDirectoryName = 'snapshots';
 const scanGuardDirectoryName = 'scan-guards';
@@ -458,7 +459,7 @@ export const getProtectedUserDataPath = (electronApp: ElectronAppLike = app): st
   const execPath = getExecutablePath(electronApp);
   const portableDataPath = getPortableDataPath(execPath);
   if (portableDataPath) {
-    return portableDataPath;
+    return join(portableDataPath, protectedUserDataFolderName);
   }
 
   const appDataPath = electronApp.getPath('appData');

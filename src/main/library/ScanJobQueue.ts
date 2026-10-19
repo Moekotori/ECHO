@@ -36,7 +36,6 @@ import { expandScanCueTracks } from './ScanCueExpansion';
 import { readScanCueAsync } from './ScanCueReader';
 import { hasNearbySidecarCue } from './SidecarCueDiscovery';
 import { beginMainBackgroundTask } from '../diagnostics/PlaybackPerformanceDiagnostics';
-import { preloadSearchIndexRomanizer } from './SearchIndexTokens';
 import type { ScanSearchTermsBuilder } from './workers/WorkerBackedLibraryScan';
 import { repairAlacTechnicalMetadataBeforeWrite } from './AlacMetadataRepair';
 import {
@@ -1013,7 +1012,7 @@ export class ScanJobQueue {
       { jobId, folderId: folder.id, phase: 'createDatabaseScanGuard', fileCount: files.length },
       () => Promise.resolve(this.createDatabaseScanGuard(this.getScanStatus(jobId))),
     );
-    const searchIndexRomanizerReady = this.searchTermsBuilder?.preload() ?? preloadSearchIndexRomanizer();
+    // Search preparation loads the dictionary lazily only for matching text.
 
     try {
       progress.flushNow({
@@ -1139,7 +1138,6 @@ export class ScanJobQueue {
         skipIdentityObservation,
         coverCacheCompletenessMemo,
         timestamp,
-        searchIndexRomanizerReady,
         metadataConcurrency,
         coverConcurrency,
         progress,
@@ -2649,7 +2647,6 @@ export class ScanJobQueue {
     skipIdentityObservation: boolean;
     coverCacheCompletenessMemo: CoverCacheCompletenessMemo;
     timestamp: string;
-    searchIndexRomanizerReady: Promise<unknown>;
     metadataConcurrency: number;
     coverConcurrency: number;
     progress: ScanProgressReporter;
@@ -2667,7 +2664,6 @@ export class ScanJobQueue {
       skipIdentityObservation,
       coverCacheCompletenessMemo,
       timestamp,
-      searchIndexRomanizerReady,
       metadataConcurrency: configuredMetadataConcurrency,
       coverConcurrency: configuredCoverConcurrency,
       progress,
@@ -2890,7 +2886,6 @@ export class ScanJobQueue {
 
     const searchStartedAtMs = performance.now();
     const searchStage = runMainBackgroundTask('library-scan:preparing_search_terms', async () => {
-      await searchIndexRomanizerReady;
       await this.consumePipelineQueue(
         parsedQueue,
         metadataConcurrency,

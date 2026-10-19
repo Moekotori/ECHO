@@ -232,10 +232,25 @@ export const getPlaybackOutputModeLabel = (
   translate: (key: TranslationKey) => string,
   platform: NodeJS.Platform | 'unknown' = 'unknown',
 ): string => {
-  if (platform === 'darwin' && (mode === 'shared' || mode === 'exclusive' || mode === 'system')) {
+  if (platform === 'darwin' && (mode === 'shared' || mode === 'exclusive')) {
     return mode === 'exclusive' ? 'CoreAudio Exclusive' : 'CoreAudio Shared';
   }
   return translate(`settings.playback.outputMode.${mode}` as TranslationKey);
+};
+
+// Keep platform names in the guidance consistent with the available output modes.
+export const getPlaybackRecommendationText = (
+  key: TranslationKey,
+  translate: (key: TranslationKey) => string,
+  platform: NodeJS.Platform | 'unknown',
+): string => {
+  const text = translate(key);
+  return platform === 'darwin'
+    ? text
+      .replaceAll('WASAPI Shared', 'CoreAudio Shared')
+      .replaceAll('WASAPI Exclusive', 'CoreAudio Exclusive')
+      .replace(/(?:Exclusive\s*\/\s*ASIO|ASIO\s*\/\s*Exclusive)/g, 'CoreAudio Exclusive')
+    : text;
 };
 
 export const getSharedBackendOptionsForPlatform = (

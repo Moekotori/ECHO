@@ -1,0 +1,91 @@
+.track-cover-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 3vw, 42px);
+  background: color-mix(in srgb, var(--theme-page-bg) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(0.8);
+  animation: track-cover-preview-backdrop-in 160ms ease-out both;
+}
+
+.track-cover-preview {
+  position: relative;
+  width: min(100%, calc(100vh - clamp(36px, 6vw, 84px)));
+  max-height: 100%;
+  border-radius: 16px;
+  box-shadow: 0 34px 100px color-mix(in srgb, var(--theme-page-text) 52%, transparent);
+  animation: track-cover-preview-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.track-cover-preview:focus {
+  outline: none;
+}
+
+.track-cover-preview img {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - clamp(36px, 6vw, 84px));
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.track-cover-preview-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 2px;
+}
+
+.track-cover-preview-action {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--theme-overlay-text);
+  background: transparent;
+  filter: drop-shadow(0 1px 3px var(--theme-overlay-bg));
+  cursor: pointer;
+}
+
+.track-cover-preview-action:hover,
+.track-cover-preview-action:focus-visible {
+  background: var(--theme-overlay-bg);
+}
+
+.track-cover-preview-action:focus-visible {
+  outline: 2px solid var(--theme-overlay-text);
+  outline-offset: 2px;
+}
+
+.track-cover-preview-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes track-cover-preview-backdrop-in {
+  from { opacity: 0; }
+}
+
+@keyframes track-cover-preview-in {
+  from { opacity: 0; transform: scale(0.975) translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track-cover-preview-backdrop,
+  .track-cover-preview {
+    animation: none;
+  }
+}
+
+.track-cover-preview-empty { display: grid; min-height: 160px; place-items: center; color: var(--theme-page-text); }

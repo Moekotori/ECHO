@@ -32,7 +32,8 @@ import type {
 } from "../../shared/types/streaming";
 import { neteaseDjRadioPlaylistPrefix, streamingProviderNames } from "../../shared/types/streaming";
 import type { PlaybackStatus } from "../../shared/types/playback";
-import { decodeTextFileBytes } from "../../shared/utils/decodeTextFile";
+import { readCustomLyricsFile } from "../components/lyrics/readCustomLyricsFile";
+import { customLyricsFileAccept, customLyricsFilePrompt, isCustomLyricsFile, firstCustomLyricsFile, hasFileDrag, maxCustomLyricsFileBytes } from "../components/lyrics/customLyricsFile";
 import { useLyricsTrackSwipe } from "../components/lyrics/useLyricsTrackSwipe";
 import { LyricsView, getActiveLyricIndex, getEstimatedPlainLyricIndex } from "../components/lyrics/LyricsView";
 import { MvPanel, mvImmersiveBackgroundScaleWheelEvent, type MvAudioClock } from "../components/lyrics/MvPanel";
@@ -1236,25 +1237,6 @@ const isSmartAlignmentOutputMode = (
   outputMode: AudioStatus["outputMode"] | null | undefined,
 ): outputMode is LyricsSmartAlignmentOutputMode =>
   Boolean(outputMode && smartAlignmentOutputModes.has(outputMode));
-
-const customLyricsExtensions = [".lrc", ".ttml"] as const;
-const maxCustomLyricsFileBytes = 2_000_000;
-
-const isCustomLyricsFile = (fileName: string): boolean => {
-  const normalizedName = fileName.toLowerCase();
-  return customLyricsExtensions.some((extension) => normalizedName.endsWith(extension));
-};
-
-const firstCustomLyricsFile = (fileList: FileList | null): File | null => {
-  if (!fileList) {
-    return null;
-  }
-
-  return Array.from(fileList).find((file) => isCustomLyricsFile(file.name)) ?? null;
-};
-
-const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
-  Array.from(dataTransfer.types).includes("Files");
 
 const selectAutoApplyCandidate = (
   candidates: LyricsSearchCandidate[],
@@ -4767,7 +4749,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
       }
 
       if (!isCustomLyricsFile(file.name)) {
-        setError("Please choose an .lrc or .ttml lyrics file");
+        setError(customLyricsFilePrompt);
         return;
       }
 
@@ -4776,12 +4758,14 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
         return;
       }
 
+      const request = ++lyricsRequestRef.current;
       setIsCustomLyricsApplying(true);
       setLyricsStatus("Applying custom lyrics...");
       try {
-        const lrcText = decodeTextFileBytes(new Uint8Array(await file.arrayBuffer()));
+        const lrcText = await readCustomLyricsFile(file);
+        if (request !== lyricsRequestRef.current) return;
         const trackLyrics = await lyricsApi.applyCustomLrc(trackId, lrcText, file.name);
-        lyricsRequestRef.current += 1;
+        if (request !== lyricsRequestRef.current) return;
         setLyrics(trackLyricsToState(trackLyrics));
         publishCurrentLyricsProvider(trackLyrics);
         smartAlignmentAutoAppliedKeyRef.current = null;
@@ -5614,7 +5598,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
               <label className="lyrics-match-import-action">
                 <input
                   type="file"
-                  accept=".lrc,.ttml,text/plain,application/ttml+xml"
+                  accept={customLyricsFileAccept}
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0];
                     if (file) {

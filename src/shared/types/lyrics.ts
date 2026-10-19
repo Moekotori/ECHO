@@ -6,6 +6,7 @@ export type LyricWordTiming = {
 
 export type LyricLine = {
   timeMs: number;
+  endMs?: number;
   text: string;
   words?: LyricWordTiming[];
   translation?: string | null;

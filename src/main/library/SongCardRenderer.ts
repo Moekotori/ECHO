@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp from '../images/sharpRuntime';
 import type { LibraryTrack } from './libraryTypes';
 import { defaultCoverSvg } from './workers/TsCoverExtractor';
 

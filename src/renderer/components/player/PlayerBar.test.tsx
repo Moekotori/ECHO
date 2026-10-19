@@ -1895,6 +1895,31 @@ describe('PlayerBar', () => {
     expect(screen.queryByText(/timeout_waiting_for_ready/)).toBeNull();
   });
 
+  it('reconciles a restored queue selection with a resident paused host on startup', async () => {
+    const rememberedTrack = makeTrack(1, { title: 'Remembered selection' });
+    const residentTrack = makeTrack(2, { title: 'Resident host track' });
+    const session = {
+      version: 1, revision: 1,
+      items: [rememberedTrack, residentTrack].map((track, index) => ({ queueId: `queue-${index}`, track, source: { type: 'manual', label: 'Restored queue' }, addedAt: '2026-10-19T00:00:00.000Z' })),
+      currentQueueId: 'queue-0', currentTrackId: rememberedTrack.id, lastPlayedTrack: rememberedTrack,
+      history: [], mode: { isShuffleEnabled: false, repeatMode: 'off', automixEnabled: false, autoFillQueueEnabled: false },
+      resume: null, updatedAt: '2026-10-19T00:00:00.000Z',
+    };
+    window.echo = {
+      playback: {
+        getQueueSession: vi.fn().mockResolvedValue(session), saveQueueSession: vi.fn().mockResolvedValue(session),
+        getStatus: vi.fn().mockResolvedValue({ state: 'paused', currentTrackId: residentTrack.id, filePath: residentTrack.path, positionMs: 4000, durationMs: residentTrack.duration * 1000 }),
+      },
+      audio: { getStatus: vi.fn().mockResolvedValue({ ...audioStatus(residentTrack), state: 'paused' }), onStatus: vi.fn(), setOutput: vi.fn() },
+      library: { getLikedTrackIds: vi.fn().mockResolvedValue({}), getTrack: vi.fn().mockResolvedValue(residentTrack) },
+      app: { getSettings: vi.fn().mockResolvedValue({ smtcEnabled: false }) },
+    } as unknown as Window['echo'];
+    render(<PlaybackQueueProvider><PlayerBar /></PlaybackQueueProvider>);
+    await screen.findByText('Resident host track');
+    expect(screen.queryByText('Remembered selection')).toBeNull();
+    expect(window.echo.playback.playLocalFile).toBeUndefined();
+  });
+
   it('hydrates restored playback from the library so cover art survives restart', async () => {
     const restoredTrack = makeTrack(9, {
       title: 'Restored Track',
@@ -2109,7 +2134,7 @@ describe('PlayerBar', () => {
     );
 
     await screen.findByText('Song 1');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: /^(Next|下一首)$/ }));
 
     await waitFor(() => expect(screen.getByText('Song 2')).toBeTruthy());
     expect(screen.queryByText('Song 1')).toBeNull();
@@ -2266,7 +2291,7 @@ describe('PlayerBar', () => {
     await screen.findByText('Song 2');
     const slider = screen.getByRole('slider', { name: 'Seek position' }) as HTMLInputElement;
     await waitFor(() => expect(Number(slider.value)).toBeGreaterThanOrEqual(7));
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^(Pause|暂停)$/ })).toBeTruthy();
   });
 
   it('does not reuse stale previous-track progress for the visible current track', async () => {

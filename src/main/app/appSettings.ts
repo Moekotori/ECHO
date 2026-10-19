@@ -247,6 +247,13 @@ const librarySorts: LibrarySort[] = [
   'artistAlbum',
   'album',
   'recent',
+  'artistDesc',
+  'albumDesc',
+  'codecAsc',
+  'codecDesc',
+  'bitrateAsc',
+  'bitrateDesc',
+  'trackNumber',
 ];
 
 export const defaultAppearancePreferences: AppearancePreferences = {

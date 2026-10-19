@@ -1,4 +1,4 @@
-/* The primary play action is the only shaped control in the main player transport. */
+/* Main player controls and the mini player window use custom glyphs; the lyrics player drawer keeps its legacy controls. */
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .player-transport-shell {
   gap: 10px;
 }
@@ -8,13 +8,17 @@
   padding-inline: 2px;
 }
 
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .output-status {
+  gap: 10px;
+}
+
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control {
   width: 38px !important;
   height: 38px !important;
   color: color-mix(in srgb, var(--theme-muted-text) 88%, var(--theme-heading-text)) !important;
   border: 0 !important;
-  border-radius: 9px !important;
+  border-radius: 6px !important;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -39,9 +43,7 @@
 }
 
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
-.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:hover,
-.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control:focus-visible,
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .signal-path-control[aria-expanded='true'] {
   color: var(--theme-heading-text) !important;
   border: 0 !important;
@@ -64,10 +66,361 @@
   transform: translateX(-50%) scaleX(1) !important;
 }
 
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-like-button.is-soft-active::after {
+  display: none !important;
+}
+
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button > svg {
   width: 18px;
   height: 18px;
   stroke-width: 1.8;
+}
+
+.app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport :is(.transport-like-filled-icon, .transport-like-outline-icon) {
+  width: 23px;
+  height: 23px;
+}
+
+.player-control-icon {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.player-control-icon__layer {
+  position: absolute;
+  inset: 0;
+  background-color: var(--theme-heading-text);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  transition: background-color 180ms ease;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.player-control-icon__layer--accent {
+  background-color: var(--theme-accent-solid-bg);
+}
+
+.player-bar :is(.icon-button, .player-primary-control) > .player-control-icon,
+.player-bar .signal-path-control .player-control-icon {
+  transform-origin: center;
+  transition:
+    filter var(--echo-motion-icon-hover-ms, 150ms) var(--echo-motion-ease-icon, ease),
+    transform var(--echo-motion-icon-hover-ms, 150ms) var(--echo-motion-ease-icon, ease);
+  will-change: auto;
+}
+
+.player-bar :is(.icon-button, .player-primary-control):hover > .player-control-icon,
+.player-bar .signal-path-control:hover .player-control-icon {
+  filter: drop-shadow(0 3px 6px color-mix(in srgb, var(--theme-accent-solid-bg) 20%, transparent));
+  transform: translateY(-1px) scale(1.08);
+}
+
+.player-bar :is(.icon-button, .player-primary-control):active > .player-control-icon,
+.player-bar .signal-path-control:active .player-control-icon {
+  filter: none;
+  transform: scale(0.86);
+  transition-duration: 70ms;
+}
+
+.player-bar .transport-skip-button[data-workshop-icon='transport-previous']:active > .player-control-icon {
+  transform: translateX(-3px) scale(0.88);
+}
+
+.player-bar .transport-skip-button[data-workshop-icon='transport-next']:active > .player-control-icon {
+  transform: translateX(3px) scale(0.88);
+}
+
+.player-control-icon[data-player-control-motion='primary-change'] {
+  animation: echo-player-primary-icon-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='mode-change'] {
+  animation: echo-player-mode-icon-in 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='like-on'] {
+  animation: echo-player-like-pop 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='like-off'] {
+  animation: echo-player-like-release 240ms var(--echo-motion-ease-standard, ease);
+}
+
+.player-control-icon[data-player-control-motion='panel-toggle'] {
+  animation: echo-player-panel-toggle 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='panel-toggle'] > .player-control-icon__layer--accent {
+  animation: echo-player-panel-accent 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='device-toggle'] {
+  animation: echo-player-device-toggle 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='device-toggle'] > .player-control-icon__layer--accent {
+  animation: echo-player-device-accent 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='volume-feedback'] {
+  animation: echo-player-volume-settle 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='volume-feedback'] > .player-control-icon__layer--accent {
+  transform-origin: 52% 50%;
+  animation: echo-player-volume-wave 440ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='speed-feedback'] {
+  animation: echo-player-speed-settle 340ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.player-control-icon[data-player-control-motion='speed-feedback'] > .player-control-icon__layer--accent {
+  transform-origin: 50% 61%;
+  animation: echo-player-speed-needle 460ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.transport-like-button.is-soft-active > .player-control-icon::after {
+  position: absolute;
+  inset: -5px;
+  border: 2px solid var(--theme-accent-solid-bg);
+  border-radius: 50%;
+  content: '';
+  opacity: 0;
+  animation: echo-player-like-ring 520ms ease-out;
+}
+
+.player-control-icon[data-player-control-motion='like-on'] > .player-control-icon__layer--accent {
+  animation: echo-player-like-accent 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes echo-player-primary-icon-in {
+  0% {
+    opacity: 0.2;
+    transform: rotate(-9deg) scale(0.58);
+  }
+
+  62% {
+    opacity: 1;
+    transform: rotate(2deg) scale(1.13);
+  }
+
+  100% {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+
+@keyframes echo-player-mode-icon-in {
+  0% {
+    opacity: 0.18;
+    transform: translateY(3px) rotate(-24deg) scale(0.54);
+  }
+
+  66% {
+    opacity: 1;
+    transform: translateY(-1px) rotate(5deg) scale(1.12);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes echo-player-like-pop {
+  0% {
+    transform: rotate(-8deg) scale(0.68);
+  }
+
+  54% {
+    transform: rotate(4deg) scale(1.24);
+  }
+
+  78% {
+    transform: rotate(-1deg) scale(0.96);
+  }
+
+  100% {
+    transform: rotate(0) scale(1);
+  }
+}
+
+@keyframes echo-player-like-release {
+  0% {
+    opacity: 0.58;
+    transform: scale(0.84);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes echo-player-like-ring {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.52);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes echo-player-like-accent {
+  0%,
+  100% {
+    filter: none;
+  }
+
+  48% {
+    filter: drop-shadow(0 0 7px color-mix(in srgb, var(--theme-accent-solid-bg) 72%, transparent));
+  }
+}
+
+@keyframes echo-player-panel-toggle {
+  0% {
+    opacity: 0.45;
+    transform: translateY(2px) scale(0.9);
+  }
+
+  62% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.08);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes echo-player-panel-accent {
+  0%,
+  28% {
+    opacity: 0.25;
+    transform: translateX(-3px) scale(0.72);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateX(1px) scale(1.12);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes echo-player-device-toggle {
+  0% {
+    opacity: 0.4;
+    transform: translateY(2px) scale(0.86);
+  }
+
+  65% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.08);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes echo-player-device-accent {
+  0%,
+  35% {
+    opacity: 0.3;
+    transform: translateY(-4px) scaleX(0.68);
+  }
+
+  76% {
+    opacity: 1;
+    transform: translateY(1px) scaleX(1.14);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scaleX(1);
+  }
+}
+
+@keyframes echo-player-volume-settle {
+  0% {
+    transform: rotate(-4deg) scale(0.9);
+  }
+
+  68% {
+    transform: rotate(1.5deg) scale(1.07);
+  }
+
+  100% {
+    transform: rotate(0) scale(1);
+  }
+}
+
+@keyframes echo-player-volume-wave {
+  0%,
+  22% {
+    opacity: 0.18;
+    transform: translateX(-4px) scaleX(0.48);
+  }
+
+  64% {
+    opacity: 1;
+    transform: translateX(1px) scaleX(1.16);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+@keyframes echo-player-speed-settle {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
+
+  66% {
+    opacity: 1;
+    transform: scale(1.07);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes echo-player-speed-needle {
+  0% {
+    opacity: 0.32;
+    transform: rotate(-22deg) scale(0.82);
+  }
+
+  68% {
+    opacity: 1;
+    transform: rotate(4deg) scale(1.08);
+  }
+
+  100% {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
 }
 
 .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .transport-skip-button {
@@ -75,7 +428,7 @@
   height: 40px !important;
   color: color-mix(in srgb, var(--theme-heading-text) 78%, var(--theme-muted-text)) !important;
   border: 0 !important;
-  border-radius: 9px !important;
+  border-radius: 6px !important;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -125,19 +478,22 @@
 
 /* Keep theme-specific rules from restoring circular frames around transport glyphs. */
 html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active,
+html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true'],
 html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
-html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button {
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active,
+html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true'],
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button.is-soft-active,
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button[aria-pressed='true'] {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
 html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
-html .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
 html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
-html[data-theme-preset] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible,
-html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover,
-html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:focus-visible {
+html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) .player-bar .transport .icon-button:hover {
   border: 0 !important;
   background: color-mix(in srgb, var(--theme-accent-bg) 54%, transparent) !important;
   box-shadow: none !important;
@@ -149,4 +505,15 @@ html[data-theme-custom='true'] .app-shell:not(.app-shell--lyrics-player-drawer) 
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-bar .player-control-icon,
+  .player-bar .player-control-icon::after,
+  .player-bar .player-control-icon__layer {
+    filter: none !important;
+    transform: none !important;
+    transition-duration: 1ms !important;
+    animation: none !important;
+  }
 }

@@ -1099,5 +1099,10 @@ export const getSmtcBridge = (): Window['echo']['smtc'] | null => getEchoBridge(
 
 export const getStreamingBridge = (): NonNullable<EchoApi['streaming']> | null => getEchoBridge()?.streaming ?? null;
 
-export const getQobuzBridge = (): QobuzBridge | null =>
-  (getEchoBridge() as (Window['echo'] & { qobuz?: QobuzBridge }) | null)?.qobuz ?? null;
+export const getQobuzBridge = (): QobuzBridge | null => {
+  const echo = getEchoBridge() as (Window['echo'] & { qobuz?: QobuzBridge }) | null;
+  if (echo?.qobuz) return echo.qobuz;
+  const accounts = echo?.accounts;
+  if (!accounts?.loginQobuz) return null;
+  return { login: accounts.loginQobuz, logout: async () => { await accounts.clear('qobuz'); } };
+};

@@ -239,6 +239,7 @@ let remoteSourcesMock: {
 beforeEach(() => {
   resetLibraryScanSessionForTests();
   __resetFoldersPageSessionForTests();
+  window.localStorage.setItem('echo-next.folders.view', 'tree');
 
   libraryMock = {
     getFolderOverviews: vi.fn().mockResolvedValue([overview()]),
@@ -348,6 +349,23 @@ afterEach(() => {
 });
 
 describe('FoldersPage', () => {
+  it('keeps songs and management reachable from the default folder wall', async () => {
+    window.localStorage.removeItem('echo-next.folders.view');
+    renderFoldersPage();
+    const openSongs = await screen.findByRole('button', { name: '查看歌曲 · Music' });
+    expect(libraryMock.getFolderTracks).not.toHaveBeenCalled();
+    fireEvent.click(openSongs);
+    expect(await screen.findByText('Root Song')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '文件夹管理' }));
+    const inspector = screen.getByRole('complementary', { name: '文件夹管理' });
+    expect(within(inspector).getByRole('button', { name: /Incremental scan|增量扫描/i })).toBeTruthy();
+    expect(within(inspector).getByRole('button', { name: /Rescan embedded tags|重扫内嵌标签/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭文件夹管理' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回文件夹墙' }));
+    expect(await screen.findByRole('region', { name: '文件夹墙' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '目录树' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('loads root overviews first and fetches child nodes lazily', async () => {
     renderFoldersPage();
 
@@ -793,7 +811,7 @@ describe('FoldersPage', () => {
     renderFoldersPage();
 
     await screen.findByRole('heading', { name: 'Folders' });
-    fireEvent.click(screen.getByRole('button', { name: 'Rescan embedded tags' }));
+    fireEvent.click(screen.getByRole('button', { name: /Rescan embedded tags|重扫内嵌标签/i }));
 
     await waitFor(() =>
       expect(libraryMock.rescanEmbeddedTags).toHaveBeenCalledWith('embedded-tags-all', {

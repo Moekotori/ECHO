@@ -23,6 +23,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
+          lyricsRomanizationWorkerHost: resolve(__dirname, 'src/main/lyrics/lyricsRomanizationWorkerHost.ts'),
           libraryScanWorkerHost: resolve(__dirname, 'src/main/library/workers/LibraryScanWorkerHost.ts'),
           libraryIdentityWorkerHost: resolve(__dirname, 'src/main/library/workers/libraryIdentityWorkerHost.ts'),
           librarySearchWorkerHost: resolve(__dirname, 'src/main/library/workers/librarySearchWorkerHost.ts'),

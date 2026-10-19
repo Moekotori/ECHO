@@ -1,3 +1,5 @@
+import type { LibraryPageParityTranslationKey } from './locales/libraryPageParityFamily';
+import type { CommunityLibraryTranslationKey } from './locales/communityLibraryFamily';
 import type { AlbumSplitTranslationKey } from './locales/albumSplitFamily';
 import { zhCN } from './locales/zhCN';
 
@@ -335,6 +337,47 @@ type UserNoticeTranslationKey =
   | 'userNotice.title';
 
 export type TranslationKey =
+  | LibraryPageParityTranslationKey
+  | CommunityLibraryTranslationKey
+  | 'songs.filter.activeCount'
+  | 'songs.filter.audioFormat.aac'
+  | 'songs.filter.audioFormat.aiff'
+  | 'songs.filter.audioFormat.alac'
+  | 'songs.filter.audioFormat.flac'
+  | 'songs.filter.audioFormat.mp3'
+  | 'songs.filter.audioFormat.ogg'
+  | 'songs.filter.audioFormat.opus'
+  | 'songs.filter.audioFormat.other'
+  | 'songs.filter.audioFormat.wav'
+  | 'songs.filter.condition'
+  | 'songs.filter.condition.all'
+  | 'songs.filter.folder'
+  | 'songs.filter.folder.all'
+  | 'songs.filter.folder.empty'
+  | 'songs.filter.folder.loading'
+  | 'songs.filter.genre'
+  | 'songs.filter.genre.all'
+  | 'songs.filter.genre.aria'
+  | 'songs.filter.hint'
+  | 'songs.filter.reset'
+  | 'songs.filter.sampleRate'
+  | 'songs.filter.sampleRate.all'
+  | 'songs.filter.sampleRate.group.hiRes'
+  | 'songs.filter.sampleRate.group.other'
+  | 'songs.filter.sampleRate.group.standard'
+  | 'songs.filter.year'
+  | 'songs.filter.year.all'
+  | 'songs.filter.year.aria'
+  | 'songs.search.empty'
+  | 'songs.sort.albumDesc'
+  | 'songs.sort.artistDesc'
+  | 'songs.sort.bitrateAsc'
+  | 'songs.sort.bitrateDesc'
+  | 'songs.sort.codecAsc'
+  | 'songs.sort.codecDesc'
+  | 'songs.sort.multi.hint'
+  | 'songs.sort.multi.label'
+  | 'songs.sort.multiCount'
   | AlbumDetailTranslationKey
   | AlbumSplitTranslationKey
   | 'common.skipToContent'

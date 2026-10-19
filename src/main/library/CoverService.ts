@@ -29,6 +29,7 @@ const { mkdir, writeFile, readFile } = require('node:fs/promises');
 const { join } = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
 const sharp = require('sharp');
+sharp.cache(false);
 
 const hashBytes = (data) => createHash('sha256').update(data).digest('hex');
 const extensionForMimeType = (mimeType) => {

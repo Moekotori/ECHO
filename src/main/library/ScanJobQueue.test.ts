@@ -3196,3 +3196,17 @@ describe('ScanJobQueue local path rescans', () => {
     });
   });
 });
+
+describe('lazy scan search preparation', () => {
+  it('prepares each track without eagerly preloading the dictionary', async () => {
+    const root = makeTempRoot();
+    const preload = vi.fn(async () => true);
+    const prepare = vi.fn(async () => 'prepared terms');
+    const status = await runQueue(new FakeStore(), new FakeScanner(makeFiles(root, 2)),
+      new FakeMetadataReader(), new CapturingCoverExtractor(), join(root, 'cache'), baseFolder(root), {},
+      { searchTermsBuilder: { preload, prepare } });
+    expect(status).toMatchObject({ status: 'completed', addedTracks: 2 });
+    expect(preload).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledTimes(2);
+  });
+});

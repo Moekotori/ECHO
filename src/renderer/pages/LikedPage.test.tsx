@@ -158,6 +158,26 @@ afterEach(() => {
 });
 
 describe("LikedPage", () => {
+  it("hides removed platform controls and queries only local likes without the streaming bridge", async () => {
+    const getLikedTracks = vi.fn().mockImplementation(async (query: { sourceProvider?: string }) =>
+      query.sourceProvider === "local" ? page([]) : page([playlistItem("old-stream", { mediaType: "stream_track", sourceProvider: "netease" })]),
+    );
+    installLibrary(getLikedTracks, vi.fn().mockResolvedValue(page([])));
+    delete window.echo.streaming;
+    renderLikedPage();
+
+    await screen.findByText("把喜欢的音乐，放在一个地方");
+    expect(screen.queryByRole("button", { name: "网易云" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "QQ音乐" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /同步/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "从平台导入" })).toBeNull();
+    expect(screen.queryByText(/从常用平台同步/)).toBeNull();
+    expect(screen.queryByText(/同步已登录账号/)).toBeNull();
+    expect(screen.getByRole("button", { name: "浏览本地音乐" })).toBeTruthy();
+    expect(screen.getAllByText("在歌曲或专辑页点亮爱心，它们会收藏到这里。")).toHaveLength(1);
+    expect(getLikedTracks.mock.calls.every(([query]) => query.sourceProvider === "local")).toBe(true);
+  });
+
   it("keeps the guided empty state inside the new collection workspace", async () => {
     installLibrary(
       vi.fn().mockResolvedValue(page([])),
@@ -458,6 +478,45 @@ describe("LikedPage", () => {
         pageSize: 500,
         search: "",
         sort: "default",
+      }),
+    );
+  });
+
+  it("keeps all playback pages local when streaming has been removed", async () => {
+    const first = playlistItem("track-1", { track: track("track-1") });
+    const second = playlistItem("track-2", { track: track("track-2") });
+    const getLikedTracks = vi
+      .fn()
+      .mockImplementation(async (query: { page: number; pageSize: number }) => {
+        if (query.pageSize === 1) {
+          return page([], { total: 2 });
+        }
+        if (query.pageSize === 500) {
+          return query.page === 2
+            ? page([second], { page: 2, pageSize: 500, total: 2 })
+            : page([first], {
+                page: 1,
+                pageSize: 500,
+                total: 2,
+                hasMore: true,
+              });
+        }
+        return page([first], { total: 2, hasMore: true });
+      });
+    installLibrary(getLikedTracks, vi.fn().mockResolvedValue(page([])));
+    delete window.echo.streaming;
+    renderLikedPage();
+
+    await screen.findByText("Track track-1");
+    fireEvent.click(screen.getByRole("button", { name: "播放全部" }));
+
+    await waitFor(() =>
+      expect(getLikedTracks).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 500,
+        search: "",
+        sort: "default",
+        sourceProvider: "local",
       }),
     );
   });

@@ -1509,7 +1509,7 @@ type ShuffleDeckSource =
 
 const shuffleDeckKeyForSource = (source: ShuffleDeckSource): string => {
   if (source.type === 'folder') {
-    return ['folder', source.folderId, source.path, source.recursive ? 'recursive' : 'direct', source.search ?? ''].join('\0');
+    return ['folder', source.folderId, source.path, source.recursive ? 'recursive' : 'direct', source.search ?? '', String(source.hideDuplicates ?? false), source.folderInsight ?? ''].join('\0');
   }
 
   if (source.type === 'liked') {
@@ -1524,6 +1524,7 @@ const shuffleDeckKeyForSource = (source: ShuffleDeckSource): string => {
     source.showDuplicatesOnly === true ? 'duplicates-only' : '',
     source.showOsuOnly === true ? 'osu-only' : '',
     source.audioFormatFilter ?? '',
+    JSON.stringify([source.sorts, source.fileFormatFilter, source.folderIds, source.filterYear, source.filterGenre, source.sourceProvider, source.sourceId]),
   ].join('\0');
 };
 
@@ -4498,6 +4499,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
             folderId: source.folderId,
             path: source.path,
             recursive: source.recursive,
+            hideDuplicates: source.hideDuplicates,
+            folderInsight: source.folderInsight,
             page: 1,
             pageSize: libraryShuffleCandidatePageSize,
             search: source.search,
@@ -4529,6 +4532,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           folderId: source.folderId,
           path: source.path,
           recursive: source.recursive,
+          hideDuplicates: source.hideDuplicates,
+          folderInsight: source.folderInsight,
           page: 1,
           pageSize: libraryShuffleCandidatePageSize,
           search: source.search,
@@ -4663,6 +4668,12 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           showDuplicatesOnly: source.showDuplicatesOnly,
           showOsuOnly: source.showOsuOnly,
           audioFormatFilter: source.audioFormatFilter,
+          fileFormatFilter: source.fileFormatFilter,
+          folderIds: source.folderIds,
+          filterYear: source.filterYear,
+          filterGenre: source.filterGenre,
+          sourceProvider: source.sourceProvider,
+          sourceId: source.sourceId,
           duplicateMode: 'strict',
           excludeTrackIds,
           randomWindow: true,
@@ -4697,6 +4708,8 @@ export const PlaybackQueueProvider = ({ children }: PropsWithChildren): JSX.Elem
           folderId: source.folderId,
           path: source.path,
           recursive: source.recursive,
+          hideDuplicates: source.hideDuplicates,
+          folderInsight: source.folderInsight,
           page: 1,
           pageSize: Math.max(2, Math.min(pageSize, libraryRandomQueueRefreshPageSize)),
           search: source.search,

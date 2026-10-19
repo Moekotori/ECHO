@@ -1,4 +1,6 @@
 import type { LyricLine, LyricWordTiming, LyricsKind } from '../../shared/types/lyrics';
+import { parseExtendedTimedLyrics } from './extendedLyricsFormats';
+import { parseLrcxLyrics } from './lrcxLyrics';
 
 const metadataTagPattern = /^\s*\[(ar|ti|al|by|offset|length|re|ve):[^\]]*\]\s*$/i;
 const timestampPattern = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
@@ -996,7 +998,7 @@ export const parseTtmlLyrics = (ttmlText: string): LyricLine[] => {
   return limitLyricLines(lines.sort((left, right) => left.timeMs - right.timeMs));
 };
 
-export const parseSyncedLyrics = (lrcText: string): LyricLine[] => {
+const parseBaseSyncedLyrics = (lrcText: string): LyricLine[] => {
   if (!isLyricsTextWithinLimit(lrcText)) {
     return [];
   }
@@ -1090,6 +1092,19 @@ export const parseSyncedLyrics = (lrcText: string): LyricLine[] => {
   }
 
   return limitLyricLines(lines.sort((left, right) => left.timeMs - right.timeMs));
+};
+
+export const parseSyncedLyrics = (text: string): LyricLine[] => {
+  if (!isLyricsTextWithinLimit(text)) return [];
+  const lrcx = parseLrcxLyrics(text, parseBaseSyncedLyrics, maxLyricWordTimingsPerLine);
+  if (lrcx !== null) return limitLyricLines(lrcx);
+  const extended = parseExtendedTimedLyrics(text, {
+    maxLines: maxParsedLyricLines,
+    maxLineTextChars: maxLyricLineTextChars,
+    maxWordsPerLine: maxLyricWordTimingsPerLine,
+    maxTrackTextChars: maxLyricsTextChars,
+  });
+  return extended === null ? parseBaseSyncedLyrics(text) : limitLyricLines(extended);
 };
 
 export const parsePlainLyrics = (plainText: string): LyricLine[] => {
@@ -1187,6 +1202,7 @@ export const deserializeLyricLines = (linesJson: string): LyricLine[] => {
         return {
           timeMs: Number(line.timeMs),
           text,
+          ...(typeof line.endMs === 'number' && Number.isFinite(line.endMs) && line.endMs > Number(line.timeMs) ? { endMs: line.endMs } : {}),
           ...(words ? { words } : {}),
           ...(typeof line.translation === 'string' ? { translation: line.translation } : {}),
           ...(typeof line.romanization === 'string' ? { romanization: line.romanization } : {}),

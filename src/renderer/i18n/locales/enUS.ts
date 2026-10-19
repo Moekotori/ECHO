@@ -1,3 +1,5 @@
+import { libraryPageParityEnUS } from './libraryPageParityFamily';
+import { communityLibraryEnUSMessages } from './communityLibraryFamily';
 import type { TranslationDictionary, TranslationKey } from '../locales';
 import { albumSplitEnUSMessages } from './albumSplitFamily';
 import { likedPageEnUS, mediaLibraryEnUS, settingsAboutDangerEnUS, settingsIntegrationsExtraEnUS, songsPageEnUS } from './enFamily';
@@ -148,6 +150,7 @@ const audioSignalPathExtrasEnUS = {
 };
 
 export const enUS: TranslationDictionary = {
+  ...communityLibraryEnUSMessages,
   'common.skipToContent': 'Skip to main content',
   'userNotice.action.accept': 'I have read and agree',
   'userNotice.action.communityBoundaries': 'Community boundaries',
@@ -2811,8 +2814,8 @@ export const enUS: TranslationDictionary = {
   'songs.filter.button': 'Filter',
   'songs.filter.menuAria': 'Song filters',
   'songs.filter.section': 'Filters',
-  'songs.filter.audioFormat': 'Sample rate / DSD',
-  'songs.filter.audioFormat.all': 'All formats',
+  'songs.filter.audioFormat': 'Audio format',
+  'songs.filter.audioFormat.all': 'Any format',
   'songs.filter.audioFormat.sampleRate44100': '44.1 kHz',
   'songs.filter.audioFormat.sampleRate48000': '48 kHz',
   'songs.filter.audioFormat.sampleRate88200': '88.2 kHz',
@@ -3888,7 +3891,7 @@ export const enUS: TranslationDictionary = {
   'settings.integrations.accounts.status.expired': 'Login expired',
   'settings.integrations.accounts.status.loggedIn': 'Logged in',
   'settings.integrations.accounts.status.loggedOut': 'Not logged in',
-  'settings.integrations.accounts.description.default': 'Reserved for lyrics, metadata, and download integrations.',
+  'settings.integrations.accounts.description.default': 'Sign in for streaming playlists, online playback, and library metadata.',
   'settings.integrations.accounts.description.bilibili': 'Used for MV parsing and high-quality playback.',
   'settings.integrations.accounts.loginAndSync': 'Log In And Sync',
   'settings.integrations.accounts.clickToLogin': 'Not Logged In, Click To Log In',
@@ -5124,6 +5127,46 @@ export const enUS: TranslationDictionary = {
   'settings.remote.ux.browser.coverLabel': 'Cover {status}',
   'settings.remote.ux.browser.lyricsLabel': 'Lyrics {status}',
   'settings.remote.ux.issue.view': 'View {kind} issues',
+  'songs.filter.folder': 'Folders',
+  'songs.filter.folder.empty': 'No imported folders',
+  'songs.filter.folder.loading': 'Loading folders…',
+  'songs.filter.reset': 'Reset',
+  'songs.search.empty': 'No tracks match this search',
+  'songs.sort.albumDesc': 'Album Z-A',
+  'songs.sort.artistDesc': 'Artist Z-A',
+  'songs.sort.bitrateAsc': 'Bitrate (low to high)',
+  'songs.sort.bitrateDesc': 'Bitrate (high to low)',
+  'songs.sort.codecAsc': 'Codec (A-Z)',
+  'songs.sort.codecDesc': 'Codec (Z-A)',
+  'songs.sort.multi.hint': 'Selection order sets priority',
+  'songs.sort.multi.label': 'Multi-sort',
+  'songs.sort.multiCount': '{count} sort rules',
+  'songs.filter.activeCount': '{count} filters',
+  'songs.filter.audioFormat.aac': 'AAC',
+  'songs.filter.audioFormat.aiff': 'AIFF',
+  'songs.filter.audioFormat.alac': 'ALAC',
+  'songs.filter.audioFormat.flac': 'FLAC',
+  'songs.filter.audioFormat.mp3': 'MP3',
+  'songs.filter.audioFormat.ogg': 'Ogg Vorbis',
+  'songs.filter.audioFormat.opus': 'Opus',
+  'songs.filter.audioFormat.other': 'Other formats',
+  'songs.filter.audioFormat.wav': 'WAV',
+  'songs.filter.condition': 'Conditions',
+  'songs.filter.condition.all': 'All tracks',
+  'songs.filter.folder.all': 'All folders',
+  'songs.filter.genre': 'Genre',
+  'songs.filter.genre.all': 'Any genre',
+  'songs.filter.genre.aria': 'Filter by genre',
+  'songs.filter.hint': 'Combine multiple conditions',
+  'songs.filter.sampleRate': 'Sample rate',
+  'songs.filter.sampleRate.all': 'Any sample rate',
+  'songs.filter.sampleRate.group.hiRes': 'Hi-Res',
+  'songs.filter.sampleRate.group.other': 'Other',
+  'songs.filter.sampleRate.group.standard': 'Standard',
+  'songs.filter.year': 'Year',
+  'songs.filter.year.all': 'Any year',
+  'songs.filter.year.aria': 'Filter by release year',
+  ...libraryPageParityEnUS,
 };
 
 export default enUS;

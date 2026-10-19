@@ -101,6 +101,7 @@
   "dependencies": {
     "@clamber_l/crypto": "^0.1.12",
     "@fontsource/outfit": "^5.2.8",
+    "@neteasecloudmusicapienhanced/api": "4.31.0",
     "@tanstack/react-virtual": "^3.13.24",
     "@vitejs/plugin-react": "^5.1.4",
     "@xmldom/xmldom": "^0.8.13",

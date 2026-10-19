@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve } from 'node:path';
-import sharp from 'sharp';
+import sharp from '../../images/sharpRuntime';
 import type { EchoDatabase } from '../../database/createDatabase';
 import { fetchWithNetworkProxy } from '../../network/networkFetch';
 import { readResponseBodyLimited, ResponseBodyTooLargeError } from '../../network/readResponseBodyLimited';

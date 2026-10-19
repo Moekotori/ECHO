@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronRight,
@@ -13,6 +13,7 @@ import {
   ListEnd,
   ListMusic,
   Minus,
+  Maximize2,
   PanelTopOpen,
   Play,
   Puzzle,
@@ -29,6 +30,7 @@ import type { PluginTrackContextMenuContribution } from '../../../shared/types/p
 import { useI18n } from '../../i18n/I18nProvider';
 import type { TranslationKey } from '../../i18n/locales';
 import { pluginTrackActionDrawerEvent } from './PluginTrackActionDrawer';
+const TrackCoverPreview = lazy(() => import('./TrackCoverPreview').then((module) => ({ default: module.TrackCoverPreview })));
 
 export type TrackMenuAction =
   | 'add-to-playlist'
@@ -49,6 +51,7 @@ export type TrackMenuAction =
   | 'copy-name-artist'
   | 'copy-cover'
   | 'save-cover'
+  | 'preview-cover'
   | 'delete-song';
 
 type TrackContextMenuProps = {
@@ -161,6 +164,7 @@ export const TrackContextMenu = ({
   const [extraActionsEnabled, setExtraActionsEnabled] = useState(() => cachedExtraActionsEnabled === true);
   const [extraActionsReady, setExtraActionsReady] = useState(() => cachedExtraActionsEnabled !== null || !window.echo?.app?.getSettings);
   const [isClosing, setIsClosing] = useState(false);
+  const [isCoverPreviewOpen, setIsCoverPreviewOpen] = useState(false);
 
   const requestClose = useCallback((): void => {
     if (closeTimerRef.current !== null) {
@@ -180,6 +184,7 @@ export const TrackContextMenu = ({
       closeTimerRef.current = null;
     }
     setIsClosing(false);
+    setIsCoverPreviewOpen(false);
   }, [position.x, position.y, track.id]);
 
   useEffect(() => () => {
@@ -376,11 +381,13 @@ export const TrackContextMenu = ({
     { action: 'copy-path', labelKey: 'trackMenu.action.copyPath', icon: Copy },
     { action: 'open-system', labelKey: 'trackMenu.action.openSystem', icon: PanelTopOpen },
     { action: 'copy-name-artist', labelKey: 'trackMenu.action.copyNameArtist', icon: ListMusic },
+    { action: 'preview-cover', labelKey: 'communityLibrary.cover.preview', icon: Maximize2 },
     { action: 'copy-cover', labelKey: 'trackMenu.action.copyCover', icon: FileImage },
     { action: 'save-cover', labelKey: 'trackMenu.action.saveCover', icon: Download },
     { action: 'delete-song', labelKey: 'trackMenu.action.deleteSong', icon: Trash2, danger: true },
   ];
   const items = allItems.filter((item) => {
+    if (item.action === 'preview-cover' && !track.coverId && !track.coverThumb) return false;
     if (enabledActionSet && !enabledActionSet.has(item.action)) {
       return false;
     }
@@ -408,6 +415,8 @@ export const TrackContextMenu = ({
     return isLocalFileTrack || !nonLocalHiddenActions.has(item.action);
   });
   const menuReady = pluginMenuReady && extraActionsReady;
+
+  if (isCoverPreviewOpen) return <Suspense fallback={null}><TrackCoverPreview track={track} onClose={onClose} /></Suspense>;
 
   return createPortal(
     <div className="track-menu-layer" role="presentation" onMouseDown={requestClose}>
@@ -448,7 +457,7 @@ export const TrackContextMenu = ({
               key={item.action}
               role="menuitem"
               type="button"
-              onClick={() => onAction(item.action, track)}
+              onClick={() => item.action === 'preview-cover' ? setIsCoverPreviewOpen(true) : onAction(item.action, track)}
             >
               <Icon size={16} />
               <span>{t(item.labelKey)}</span>

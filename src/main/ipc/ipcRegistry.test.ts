@@ -58,6 +58,7 @@ const PUSH_ONLY_CHANNELS = new Set<string>([
 /** List of IPC source files (excluding tests) that register handlers. */
 const IPC_SOURCE_FILES = [
   'registerIpc.ts',
+  'streamingIpc.ts',
   'audioCdIpc.ts',
   'audioIpc.ts',
   'connectIpc.ts',

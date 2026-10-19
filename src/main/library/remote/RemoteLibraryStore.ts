@@ -604,8 +604,12 @@ export class RemoteLibraryStore {
     switch (sort) {
       case 'artist':
         return 'ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
+      case 'artistDesc':
+        return 'ORDER BY artist COLLATE NOCASE DESC, title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'artistAlbum':
         return 'ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
+      case 'albumDesc':
+        return 'ORDER BY album COLLATE NOCASE DESC, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'album':
         return 'ORDER BY album COLLATE NOCASE, COALESCE(disc_no, 0), COALESCE(track_no, 999999), title COLLATE NOCASE, remote_path COLLATE NOCASE, id';
       case 'recent':

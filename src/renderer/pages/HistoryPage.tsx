@@ -1,3 +1,5 @@
+import { HistoryDateFilters } from './history/HistoryDateFilters';
+import { defaultHistoryDates, historyDateRange, type HistoryFilter } from './history/historyDateRange';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowRight, BarChart3, Brain, CalendarDays, Clock3, Disc3, Heart, ListX, Moon, Music2, Radio, RefreshCw, Search, SkipForward, Sparkles, Trash2, Trophy } from 'lucide-react';
@@ -21,7 +23,7 @@ import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { openAlbumDetailForTrack } from '../utils/albumNavigation';
 import { openArtistDetailByName } from '../utils/artistNavigation';
 import { localCoverDisplayUrl } from '../utils/coverDisplayUrl';
-import { useImeAwareDebouncedSearch } from '../utils/imeInput';
+import { DebouncedSearchInput } from '../components/common/DebouncedSearchInput';
 import '../styles/history-redesign.css';
 
 const pageSize = 10;
@@ -37,7 +39,6 @@ const historyStatsDeferredPlaybackStates = new Set(['loading', 'playing']);
 const recentPlaybackCardMinWidthPx = 220;
 const recentPlaybackCardGapPx = 10;
 
-type HistoryFilter = 'all' | 'today' | 'week' | 'month' | 'completed';
 type HistorySourceFilter = 'all' | 'local' | 'streaming';
 
 type HistoryPageData = {
@@ -61,15 +62,7 @@ type StoredHistoryPageCache = {
 
 type HistoryPageTranslationKey = Parameters<ReturnType<typeof useI18n>['t']>[0];
 
-const filterLabelKeys: Record<HistoryFilter, HistoryPageTranslationKey> = {
-  all: 'historyPage.filter.all',
-  today: 'historyPage.filter.today',
-  week: 'historyPage.filter.week',
-  month: 'historyPage.filter.month',
-  completed: 'historyPage.filter.completed',
-};
-
-const filterSummaryLabelKeys: Record<HistoryFilter, { count: HistoryPageTranslationKey; duration: HistoryPageTranslationKey; tracks: HistoryPageTranslationKey; latest: HistoryPageTranslationKey; group: HistoryPageTranslationKey }> = {
+const filterSummaryLabelKeys: Record<Exclude<HistoryFilter, 'year' | 'custom'>, { count: HistoryPageTranslationKey; duration: HistoryPageTranslationKey; tracks: HistoryPageTranslationKey; latest: HistoryPageTranslationKey; group: HistoryPageTranslationKey }> = {
   all: {
     count: 'historyPage.summary.all.count',
     duration: 'historyPage.summary.all.duration',
@@ -462,34 +455,6 @@ const startOfWeek = (date: Date): Date => {
   return next;
 };
 
-const historyFilterRange = (filter: HistoryFilter): Pick<PlaybackHistoryQuery, 'from' | 'to' | 'completedOnly'> => {
-  const now = new Date();
-  const today = startOfDay(now);
-
-  if (filter === 'today') {
-    return { from: today.toISOString(), to: addDays(today, 1).toISOString() };
-  }
-
-  if (filter === 'week') {
-    const week = startOfWeek(today);
-    return { from: week.toISOString(), to: addDays(week, 7).toISOString() };
-  }
-
-  if (filter === 'month') {
-    const month = new Date(today);
-    month.setDate(1);
-    const nextMonth = new Date(month);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-    return { from: month.toISOString(), to: nextMonth.toISOString() };
-  }
-
-  if (filter === 'completed') {
-    return { completedOnly: true };
-  }
-
-  return {};
-};
-
 const formatDuration = (seconds: number): string => {
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return '--:--';
@@ -638,9 +603,15 @@ export const HistoryPage = (): JSX.Element => {
   const [page, setPage] = useState(initialHistoryData.page);
   const [total, setTotal] = useState(initialHistoryData.total);
   const [hasMore, setHasMore] = useState(initialHistoryData.hasMore);
-  const { search, searchInputProps } = useImeAwareDebouncedSearch(250);
+  const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [customDates, setCustomDates] = useState(defaultHistoryDates);
+  const [completedOnly, setCompletedOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<HistorySourceFilter>('all');
+  const historyScopeQuery = useCallback(() => ({
+    ...historyDateRange(filter, customDates, completedOnly),
+    ...(sourceFilter === 'all' ? {} : { mediaType: sourceFilter }),
+  }), [filter, customDates, completedOnly, sourceFilter]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshingInvalid, setIsRefreshingInvalid] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -670,7 +641,7 @@ export const HistoryPage = (): JSX.Element => {
 
   useEffect(() => {
     setRefreshResultMessage(null);
-  }, [filter, search, sourceFilter]);
+  }, [historyScopeQuery, search]);
 
   const scheduleStatsRefresh = useCallback(
     (historyQuery: PlaybackHistoryQuery, shouldCacheSnapshot: boolean): void => {
@@ -745,7 +716,7 @@ export const HistoryPage = (): JSX.Element => {
       if (mode === 'replace') {
         invalidateStatsRefresh();
       }
-      const shouldCacheSnapshot = mode === 'replace' && nextPage === 1 && isDefaultHistoryQuery(filter, search);
+      const shouldCacheSnapshot = mode === 'replace' && nextPage === 1 && (isDefaultHistoryQuery(filter, search) && !completedOnly && sourceFilter === 'all');
       const hasVisibleCachedSnapshot = shouldCacheSnapshot && hasHistoryPageData(cachedHistoryPageData);
       setIsLoading(!hasVisibleCachedSnapshot);
       setError(null);
@@ -768,7 +739,7 @@ export const HistoryPage = (): JSX.Element => {
       }
 
       try {
-        const rangeQuery = historyFilterRange(filter);
+        const rangeQuery = historyScopeQuery();
         const historyQuery = {
           page: nextPage,
           pageSize,
@@ -828,12 +799,12 @@ export const HistoryPage = (): JSX.Element => {
         }
       }
     },
-    [filter, invalidateStatsRefresh, scheduleStatsRefresh, search, sourceFilter, t],
+    [filter, historyScopeQuery, completedOnly, invalidateStatsRefresh, scheduleStatsRefresh, search, sourceFilter, t],
   );
 
   useEffect(() => {
     const delayMs =
-      isDefaultHistoryQuery(filter, search) && hasHistoryPageData(cachedHistoryPageData) ? historyCachedRefreshDelayMs : 0;
+      (isDefaultHistoryQuery(filter, search) && !completedOnly && sourceFilter === 'all') && hasHistoryPageData(cachedHistoryPageData) ? historyCachedRefreshDelayMs : 0;
 
     let cancelRefresh = scheduleHistoryWork(() => void loadHistory(1, 'replace'), delayMs);
     const handleHistoryChanged = (): void => {
@@ -848,11 +819,11 @@ export const HistoryPage = (): JSX.Element => {
   }, [filter, loadHistory, search, sourceFilter]);
 
   const summaryLabels = useMemo(() => {
-    const keys = filterSummaryLabelKeys[filter];
+    const keys = filterSummaryLabelKeys[filter === 'year' || filter === 'custom' ? 'all' : filter];
     return {
-      count: t(keys.count),
-      duration: t(keys.duration),
-      group: t(keys.group),
+      count: filter === 'year' || filter === 'custom' ? t('communityLibrary.history.count') : t(keys.count),
+      duration: filter === 'year' || filter === 'custom' ? t('communityLibrary.history.duration') : t(keys.duration),
+      group: filter === 'year' ? t('communityLibrary.history.year') : filter === 'custom' ? t('communityLibrary.history.custom') : t(keys.group),
       tracks: t(keys.tracks),
       latest: t(keys.latest),
     };
@@ -863,8 +834,8 @@ export const HistoryPage = (): JSX.Element => {
       return [];
     }
 
-    return [[t(filterSummaryLabelKeys[filter].group), sortHistoryItems(items)] as const];
-  }, [filter, items, t]);
+    return [[summaryLabels.group, sortHistoryItems(items)] as const];
+  }, [summaryLabels.group, items]);
 
   const handleDeleteEntry = useCallback(
     async (entry: PlaybackHistoryEntry): Promise<void> => {
@@ -877,7 +848,7 @@ export const HistoryPage = (): JSX.Element => {
       try {
         setError(null);
         await library.deletePlaybackHistoryEntry(entry.id);
-        const shouldCacheSnapshot = isDefaultHistoryQuery(filter, search);
+        const shouldCacheSnapshot = (isDefaultHistoryQuery(filter, search) && !completedOnly && sourceFilter === 'all');
         const nextTotal = Math.max(0, total - 1);
         setItems((currentItems) => {
           const nextItems = currentItems.filter((item) => item.id !== entry.id);
@@ -897,7 +868,7 @@ export const HistoryPage = (): JSX.Element => {
           return nextItems;
         });
         setTotal(nextTotal);
-        const historyQuery = { search, ...historyFilterRange(filter) };
+        const historyQuery = { search, ...historyScopeQuery() };
         const nextSummary = await (library.getPlaybackHistorySummary?.(historyQuery) ?? Promise.resolve(null));
         setSummary(nextSummary);
         if (shouldCacheSnapshot) {
@@ -908,7 +879,7 @@ export const HistoryPage = (): JSX.Element => {
         setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
       }
     },
-    [filter, scheduleStatsRefresh, search, t, total],
+    [filter, historyScopeQuery, completedOnly, sourceFilter, scheduleStatsRefresh, search, t, total],
   );
 
   const handleClearHistory = useCallback(async (): Promise<void> => {
@@ -918,7 +889,7 @@ export const HistoryPage = (): JSX.Element => {
 
     try {
       await window.echo?.library?.clearPlaybackHistory();
-      const shouldCacheSnapshot = isDefaultHistoryQuery(filter, search);
+      const shouldCacheSnapshot = (isDefaultHistoryQuery(filter, search) && !completedOnly && sourceFilter === 'all');
       setItems([]);
       setRecentItems([]);
       setPage(1);
@@ -927,7 +898,7 @@ export const HistoryPage = (): JSX.Element => {
       invalidateStatsRefresh();
       setStats(null);
       setMemory(null);
-      const historyQuery = { search, ...historyFilterRange(filter) };
+      const historyQuery = { search, ...historyScopeQuery() };
       const nextSummary = await (window.echo?.library?.getPlaybackHistorySummary?.(historyQuery) ?? Promise.resolve(null));
       setSummary(nextSummary);
       if (shouldCacheSnapshot) {
@@ -947,7 +918,7 @@ export const HistoryPage = (): JSX.Element => {
     } catch (clearError) {
       setError(clearError instanceof Error ? clearError.message : String(clearError));
     }
-  }, [filter, invalidateStatsRefresh, search, t]);
+  }, [filter, historyScopeQuery, completedOnly, sourceFilter, invalidateStatsRefresh, search, t]);
 
   const handleRefreshInvalidHistory = useCallback(async (): Promise<void> => {
     const library = window.echo?.library;
@@ -1037,7 +1008,7 @@ export const HistoryPage = (): JSX.Element => {
       <section className="history-toolbar" aria-label={t('historyPage.toolbar.aria')}>
         <label className="history-search">
           <Search size={17} />
-          <input type="search" placeholder={t('historyPage.search.placeholder')} {...searchInputProps} />
+          <DebouncedSearchInput placeholder={t('historyPage.search.placeholder')} initialValue={search} onSearchChange={setSearch} />
         </label>
         <div className="history-filter-groups">
           <div className="history-source-tabs" aria-label={t('historyPage.source.aria')}>
@@ -1051,13 +1022,8 @@ export const HistoryPage = (): JSX.Element => {
               {t('historyPage.source.streaming')}
             </button>
           </div>
-          <div className="history-filter-tabs">
-            {(Object.keys(filterLabelKeys) as HistoryFilter[]).map((value) => (
-              <button key={value} className={filter === value ? 'active' : ''} type="button" onClick={() => setFilter(value)}>
-                {t(filterLabelKeys[value])}
-              </button>
-            ))}
-          </div>
+          <HistoryDateFilters filter={filter} dates={customDates} completedOnly={completedOnly}
+            onFilter={setFilter} onDates={setCustomDates} onCompleted={setCompletedOnly} />
         </div>
         <div className="history-toolbar-meta">
           <section className="history-summary-grid" aria-label={t('historyPage.summary.aria')}>

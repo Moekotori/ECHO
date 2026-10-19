@@ -1,3 +1,5 @@
+import { libraryPageParityZhTW } from './libraryPageParityFamily';
+import { communityLibraryZhTWMessages } from './communityLibraryFamily';
 import type { TranslationDictionary, TranslationKey } from '../locales';
 import { albumSplitZhTWMessages } from './albumSplitFamily';
 import { likedPageZhCN as likedPageZhTW, mediaLibraryZhCN as mediaLibraryZhTW, settingsAboutDangerZhCN as settingsAboutDangerZhTW, settingsIntegrationsExtraZhCN as settingsIntegrationsExtraZhTW, songsPageZhCN as songsPageZhTW } from './zhFamily';
@@ -148,6 +150,7 @@ const audioSignalPathExtrasZhTW = {
 };
 
 export const zhTW: TranslationDictionary = {
+  ...communityLibraryZhTWMessages,
   'common.skipToContent': '跳到主要內容',
   'userNotice.action.accept': '我已閱讀並同意',
   'userNotice.action.communityBoundaries': '社群邊界',
@@ -2745,7 +2748,7 @@ export const zhTW: TranslationDictionary = {
   'songs.filter.button': '篩選',
   'songs.filter.menuAria': '歌曲篩選',
   'songs.filter.section': '篩選',
-  'songs.filter.audioFormat': '取樣率 / DSD',
+  'songs.filter.audioFormat': '音訊格式',
   'songs.filter.audioFormat.all': '全部格式',
   'songs.filter.audioFormat.sampleRate44100': '44.1 kHz',
   'songs.filter.audioFormat.sampleRate48000': '48 kHz',
@@ -3676,7 +3679,7 @@ export const zhTW: TranslationDictionary = {
   'settings.integrations.mobile.description': '未來外部裝置能力會走受控 IPC，不讓 Renderer 直接連系統資源。',
   'settings.integrations.accounts.cookieFallback': '登入帳號後會自動儲存 Cookie；手動貼上 Cookie 作為備用方式。',
   'settings.integrations.accounts.cookiePlaceholder': '貼上 Cookie 後儲存',
-  'settings.integrations.accounts.description.default': '歌詞、中繼資料和下載接入預留。',
+  'settings.integrations.accounts.description.default': '登入帳號以使用串流歌單、線上播放與曲庫資訊服務。',
   'settings.integrations.accounts.description.bilibili': '用於 MV 解析和高畫質。',
   'settings.integrations.accounts.loginAndSync': '登入並同步',
   'settings.integrations.accounts.clickToLogin': '未登入，點此登入',
@@ -5122,6 +5125,46 @@ export const zhTW: TranslationDictionary = {
   'settings.remote.ux.browser.coverLabel': '封面 {status}',
   'settings.remote.ux.browser.lyricsLabel': '歌詞 {status}',
   'settings.remote.ux.issue.view': '檢視{kind}問題',
+  'songs.filter.audioFormat.other': '其他格式',
+  'songs.filter.folder': '資料夾',
+  'songs.filter.folder.empty': '暫無已匯入資料夾',
+  'songs.filter.folder.loading': '正在載入資料夾…',
+  'songs.filter.reset': '重設',
+  'songs.filter.sampleRate': '取樣率',
+  'songs.filter.sampleRate.all': '不限取樣率',
+  'songs.search.empty': '沒有符合目前搜尋的曲目',
+  'songs.sort.albumDesc': '專輯 Z-A',
+  'songs.sort.artistDesc': '藝人 Z-A',
+  'songs.sort.bitrateAsc': '位元率（低到高）',
+  'songs.sort.bitrateDesc': '位元率（高到低）',
+  'songs.sort.codecAsc': '編碼（A-Z）',
+  'songs.sort.codecDesc': '編碼（Z-A）',
+  'songs.sort.multi.hint': '依選取順序決定優先順序',
+  'songs.sort.multi.label': '多選排序',
+  'songs.sort.multiCount': '{count} 項排序',
+  'songs.filter.activeCount': '{count} 件の条件',
+  'songs.filter.audioFormat.aac': 'AAC',
+  'songs.filter.audioFormat.aiff': 'AIFF',
+  'songs.filter.audioFormat.alac': 'ALAC',
+  'songs.filter.audioFormat.flac': 'FLAC',
+  'songs.filter.audioFormat.mp3': 'MP3',
+  'songs.filter.audioFormat.ogg': 'Ogg Vorbis',
+  'songs.filter.audioFormat.opus': 'Opus',
+  'songs.filter.audioFormat.wav': 'WAV',
+  'songs.filter.condition': '条件',
+  'songs.filter.condition.all': 'すべての曲',
+  'songs.filter.folder.all': 'すべてのフォルダー',
+  'songs.filter.genre': 'ジャンル',
+  'songs.filter.genre.all': 'すべてのジャンル',
+  'songs.filter.genre.aria': 'ジャンルで絞り込む',
+  'songs.filter.hint': '複数の条件を組み合わせられます',
+  'songs.filter.sampleRate.group.hiRes': 'Hi-Res',
+  'songs.filter.sampleRate.group.other': 'その他',
+  'songs.filter.sampleRate.group.standard': '標準',
+  'songs.filter.year': '年',
+  'songs.filter.year.all': 'すべての年',
+  'songs.filter.year.aria': 'リリース年で絞り込む',
+  ...libraryPageParityZhTW,
 };
 
 export default zhTW;

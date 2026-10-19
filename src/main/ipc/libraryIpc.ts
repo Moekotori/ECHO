@@ -1,3 +1,4 @@
+import { closeDefaultStreamingService } from '../streaming/StreamingService';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { copyFile as copyFileAsync, rm as rmAsync, writeFile as writeFileAsync } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -121,6 +122,7 @@ const sortValues = new Set<LibrarySort>([
   'artistDesc',
   'artistAlbum',
   'album',
+  'albumDesc',
   'albumCountDesc',
   'trackCountAsc',
   'trackCountDesc',
@@ -166,6 +168,7 @@ const closeLibraryDatabaseUsers = async (): Promise<void> => {
   closeAlbumSplitService();
   closeDefaultLyricsService();
   closeDefaultMvService();
+  closeDefaultStreamingService();
   closeDefaultRemoteSourceService();
   await closeDefaultLibraryService();
   getLibraryDatabaseManager().closeAllUsers('manual-library-maintenance');
@@ -395,6 +398,18 @@ const normalizeQuery = (value: unknown): LibraryPageQuery => {
   if (typeof input.sort === 'string' && sortValues.has(input.sort as LibrarySort)) {
     query.sort = input.sort as LibrarySort;
   }
+
+  if (Array.isArray(input.sorts)) {
+    query.sorts = Array.from(new Set(input.sorts.filter((item): item is LibrarySort => typeof item === 'string' && sortValues.has(item as LibrarySort)))).slice(0, 32);
+  }
+  const fileFormats = new Set(['all', 'flac', 'mp3', 'wav', 'aiff', 'alac', 'aac', 'ogg', 'opus', 'dsd', 'other']);
+  if (typeof input.fileFormatFilter === 'string' && fileFormats.has(input.fileFormatFilter)) query.fileFormatFilter = input.fileFormatFilter as LibraryPageQuery['fileFormatFilter'];
+  if (typeof input.folderInsight === 'string' && ['recentlyAdded', 'unplayed', 'lossless', 'hiRes', 'missingCover', 'missingLyrics', 'duplicates'].includes(input.folderInsight)) {
+    query.folderInsight = input.folderInsight as LibraryPageQuery['folderInsight'];
+  }
+  if (Array.isArray(input.folderIds)) query.folderIds = Array.from(new Set(input.folderIds.filter((id): id is string => typeof id === 'string' && id.length > 0))).slice(0, 128);
+  if (typeof input.filterYear === 'number' && Number.isInteger(input.filterYear) && input.filterYear >= 1000 && input.filterYear <= 2100) query.filterYear = input.filterYear;
+  if (typeof input.filterGenre === 'string') query.filterGenre = input.filterGenre.trim().slice(0, 256);
 
   if (typeof input.audioFormatFilter === 'string' && audioFormatFilterValues.has(input.audioFormatFilter as LibraryAudioFormatFilter)) {
     query.audioFormatFilter = input.audioFormatFilter as LibraryAudioFormatFilter;
@@ -1897,6 +1912,7 @@ export const registerLibraryIpc = (): void => {
   ipcMain.handle(IpcChannels.LibraryGetTrack, (_event, trackId: unknown) =>
     getLibraryService().getTrack(requireText(trackId, 'trackId')),
   );
+  ipcMain.handle(IpcChannels.LibraryGetSongFilterGenres, (_event, source: unknown) => getLibraryService().getSongFilterGenres(source === 'remote' ? 'remote' : 'local'));
   ipcMain.handle(IpcChannels.LibraryGetTracks, (_event, query: unknown) =>
     getLibraryService().getTracksAsync(normalizeQuery(query)),
   );

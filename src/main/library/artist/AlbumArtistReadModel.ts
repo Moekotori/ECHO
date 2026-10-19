@@ -1,3 +1,4 @@
+import { libraryReadStatement } from '../LibraryReadStatements';
 import type { EchoDatabase } from '../../database/createDatabase';
 import type { ArtistMergeStrategy } from '../../../shared/types/appSettings';
 import type {
@@ -426,17 +427,20 @@ export class AlbumArtistReadModel {
     const { page, pageSize, search, sort, sourceId, prioritizeArtistAvatars } = pageFromQuery(query);
     const offset = (page - 1) * pageSize;
     const remote = isRemoteQuery(query);
+    const folderIds = Array.from(new Set(query?.folderIds ?? [])).slice(0, 128);
+    if (remote && folderIds.length) return emptyPage(page, pageSize);
     const rows = mergeGroupedCredits(
-      this.allRows(this.groupedCreditsSql(remote, sourceId), ...this.sourceParams(remote, sourceId)),
+      this.allRows(this.groupedCreditsSql(remote, sourceId, folderIds), ...this.sourceParams(remote, sourceId), ...folderIds),
       this.mergeStrategy(),
       remote,
     );
-    this.attachAvatars(rows);
+    if (prioritizeArtistAvatars) this.attachAvatars(rows);
     const filtered = search
       ? rows.filter((row) => String(row.display_name ?? '').toLocaleLowerCase().includes(search.toLocaleLowerCase()))
       : rows;
     const sorted = sortGroupedArtists(filtered, sort, prioritizeArtistAvatars);
     const pageRows = sorted.slice(offset, offset + pageSize);
+    if (!prioritizeArtistAvatars) this.attachAvatars(pageRows);
 
     return {
       items: pageRows.map((row) => mapArtist(row, this.locatorFromRow(row, remote))),
@@ -676,7 +680,7 @@ export class AlbumArtistReadModel {
     return normalizeArtistMergeStrategy(this.readSearchOptions().artistMergeStrategy);
   }
 
-  private groupedCreditsSql(remote: boolean, sourceId: string | null): string {
+  private groupedCreditsSql(remote: boolean, sourceId: string | null, folderIds: string[] = []): string {
     if (remote) {
       const sourceFilterSql = sourceId ? 'AND remote_tracks.source_id = ?' : '';
       return `SELECT
@@ -707,7 +711,7 @@ export class AlbumArtistReadModel {
           COALESCE(play_count, 0) AS play_count,
           created_at
         FROM tracks
-        WHERE missing = 0
+        WHERE missing = 0${folderIds.length ? ` AND tracks.folder_id IN (${folderIds.map(() => '?').join(', ')})` : ''}
       ),
       track_grouped AS (
         SELECT
@@ -893,10 +897,10 @@ export class AlbumArtistReadModel {
   }
 
   private getRow(sql: string, ...params: unknown[]): DbRow | null {
-    return (this.database.prepare(sql).get(...params) as DbRow | undefined) ?? null;
+    return (libraryReadStatement(this.database, sql).get(...params) as DbRow | undefined) ?? null;
   }
 
   private allRows(sql: string, ...params: unknown[]): DbRow[] {
-    return this.database.prepare(sql).all(...params) as DbRow[];
+    return libraryReadStatement(this.database, sql).all(...params) as DbRow[];
   }
 }

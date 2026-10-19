@@ -1,10 +1,48 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImgHTMLAttributes, RefObject, SyntheticEvent } from 'react';
+import { useRouteActivity, useRouteResourcesActive } from './RouteActivityContext';
 import { getPageScrollContainer } from './InfiniteScrollSentinel';
+import { observeWallImageResidency } from './wallImageResidency';
+import { observeWallImageVisibility } from './wallImageVisibility';
 
 const wallImageIdleDelayMs = 180;
 const maxConcurrentWallImages = 8;
 const wallImageSlotLeaseMs = 1200;
+
+const wallImageReleaseMarginExtraPx = 400;
+
+const expandMarginToken = (token: string, extraPx: number): string => {
+  const match = /^(-?\d+(?:\.\d+)?)px$/i.exec(token);
+  if (!match) {
+    return token;
+  }
+
+  return `${Math.max(0, Number(match[1]) + extraPx)}px`;
+};
+
+export const expandWallImageRootMargin = (
+  rootMargin: string,
+  extraPx = wallImageReleaseMarginExtraPx,
+): string => {
+  const parts = rootMargin.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return `${Math.max(0, extraPx)}px 0px`;
+  }
+
+  if (parts.length === 1) {
+    return expandMarginToken(parts[0], extraPx);
+  }
+
+  if (parts.length === 2) {
+    return `${expandMarginToken(parts[0], extraPx)} ${parts[1]}`;
+  }
+
+  if (parts.length === 3) {
+    return `${expandMarginToken(parts[0], extraPx)} ${parts[1]} ${expandMarginToken(parts[2], extraPx)}`;
+  }
+
+  return `${expandMarginToken(parts[0], extraPx)} ${parts[1]} ${expandMarginToken(parts[2], extraPx)} ${parts[3]}`;
+};
 
 let activeWallImageLoads = 0;
 const wallImageQueue: Array<() => void> = [];
@@ -119,6 +157,8 @@ export const DeferredWallImage = ({
   src,
   ...imageProps
 }: DeferredWallImageProps): JSX.Element => {
+  const isRouteActive = useRouteActivity();
+  const resourcesActive = useRouteResourcesActive();
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const cancelSlotRef = useRef<(() => void) | null>(null);
   const releaseSlotRef = useRef<(() => void) | null>(null);
@@ -133,67 +173,57 @@ export const DeferredWallImage = ({
     releaseSlotRef.current = null;
     setIsNearViewport(priority);
     setIsInViewport(priority);
-    setCanLoad(priority);
-  }, [priority, src]);
+    setCanLoad(resourcesActive && priority);
+  }, [priority, resourcesActive, src]);
 
   useEffect(() => {
-    if (priority || isInViewport) {
-      return undefined;
-    }
-
+    if (!isRouteActive || !resourcesActive || priority) return undefined;
     const anchor = anchorRef.current;
-    if (!anchor || typeof window.IntersectionObserver !== 'function') {
-      return undefined;
-    }
+    if (!anchor || typeof window.IntersectionObserver !== 'function') return undefined;
 
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setIsNearViewport(true);
-          setIsInViewport(true);
-          observer.disconnect();
-        }
-      },
-      {
-        root: getPageScrollContainer(anchor),
-        rootMargin: '0px',
-      },
-    );
-
-    observer.observe(anchor);
-    return () => observer.disconnect();
-  }, [isInViewport, priority]);
+    // Keep tracking visibility so a released image can load immediately on return.
+    return observeWallImageVisibility(anchor, getPageScrollContainer(anchor), '0px', (entry) => {
+      setIsInViewport(entry.isIntersecting);
+      if (entry.isIntersecting) setIsNearViewport(true);
+    });
+  }, [isRouteActive, priority, resourcesActive, src]);
 
   useEffect(() => {
-    if (priority || isNearViewport) {
-      return undefined;
-    }
-
+    if (!isRouteActive || !resourcesActive || priority || isNearViewport) return undefined;
     const anchor = anchorRef.current;
     if (!anchor || typeof window.IntersectionObserver !== 'function') {
       setIsNearViewport(true);
       return undefined;
     }
 
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setIsNearViewport(true);
-          observer.disconnect();
-        }
-      },
-      {
-        root: getPageScrollContainer(anchor),
-        rootMargin,
-      },
-    );
-
-    observer.observe(anchor);
-    return () => observer.disconnect();
-  }, [isNearViewport, priority, rootMargin]);
+    let stop = (): void => undefined;
+    stop = observeWallImageVisibility(anchor, getPageScrollContainer(anchor), rootMargin, (entry) => {
+      if (entry.isIntersecting) {
+        setIsNearViewport(true);
+        stop();
+      }
+    });
+    return stop;
+  }, [isNearViewport, isRouteActive, priority, resourcesActive, rootMargin, src]);
 
   useEffect(() => {
-    if (canLoad || !isNearViewport) {
+    const anchor = anchorRef.current;
+    if (!isRouteActive || !resourcesActive || priority || !canLoad || !anchor) return undefined;
+
+    // A wider residency band and grace period avoid churn on short reverse scrolls.
+    return observeWallImageResidency(anchor, getPageScrollContainer(anchor), expandWallImageRootMargin(rootMargin), () => {
+      cancelSlotRef.current?.();
+      cancelSlotRef.current = null;
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+      setIsNearViewport(false);
+      setIsInViewport(false);
+      setCanLoad(false);
+    });
+  }, [canLoad, isRouteActive, priority, resourcesActive, rootMargin, src]);
+
+  useEffect(() => {
+    if (!isRouteActive || !resourcesActive || canLoad || !isNearViewport) {
       return undefined;
     }
 
@@ -223,7 +253,7 @@ export const DeferredWallImage = ({
         cancelSlotRef.current = null;
       }
     };
-  }, [canLoad, isInViewport, isNearViewport, paused, priority]);
+  }, [canLoad, isInViewport, isNearViewport, isRouteActive, paused, priority, resourcesActive]);
 
   useEffect(() => {
     return () => {
@@ -250,8 +280,8 @@ export const DeferredWallImage = ({
   };
 
   return (
-    <span className="deferred-wall-image" data-ready={canLoad ? 'true' : 'false'} ref={anchorRef}>
-      {canLoad ? <img {...imageProps} src={src} onError={handleError} onLoad={handleLoad} /> : null}
+    <span className="deferred-wall-image" data-ready={resourcesActive && (canLoad || priority) ? 'true' : 'false'} ref={anchorRef}>
+      {resourcesActive && (canLoad || priority) ? <img {...imageProps} src={src} onError={handleError} onLoad={handleLoad} /> : null}
     </span>
   );
 };

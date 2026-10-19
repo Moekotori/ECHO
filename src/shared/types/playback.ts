@@ -4,6 +4,7 @@ import type {
   ContinuousPlayPreference,
   ContinuousPlayReason,
   LibraryAudioFormatFilter,
+  LibraryPageQuery,
   LibraryTrack,
 } from './library';
 import type { PlayableTrack } from './remoteSources';
@@ -121,10 +122,17 @@ export type PersistedQueueSource =
       showDuplicatesOnly?: boolean;
       showOsuOnly?: boolean;
       audioFormatFilter?: LibraryAudioFormatFilter;
+      sorts?: LibraryPageQuery['sorts'];
+      fileFormatFilter?: LibraryPageQuery['fileFormatFilter'];
+      folderIds?: string[];
+      filterYear?: number;
+      filterGenre?: string;
+      sourceProvider?: LibraryPageQuery['sourceProvider'];
+      sourceId?: string | null;
     }
   | { type: 'album'; label: string; albumId: string }
   | { type: 'artist'; label: string; artistId?: string }
-  | { type: 'folder'; label: string; folderId: string; path: string; recursive: boolean; search?: string; sort?: string }
+  | { type: 'folder'; label: string; folderId: string; path: string; recursive: boolean; search?: string; sort?: string; hideDuplicates?: boolean; folderInsight?: LibraryPageQuery['folderInsight'] }
   | { type: 'liked'; label: string; sourceProvider: 'local' | 'netease' | 'qqmusic'; search?: string; sort?: string }
   | { type: 'streaming'; label: string; provider: string }
   | { type: 'local-file'; label: string }

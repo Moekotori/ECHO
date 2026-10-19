@@ -4,6 +4,7 @@ import { dirname, extname } from 'node:path';
 import { parseFile, type IAudioMetadata, type ILyricsTag } from 'music-metadata';
 import type { LyricsQuery, LyricsSearchCandidate, TrackLyrics } from '../../shared/types/lyrics';
 import { decodeTextFileBytes } from '../../shared/utils/decodeTextFile';
+import { decodeKrcFileBytes } from './extendedLyricsFormats';
 import { providerResultToTrackLyrics } from './LyricsProvider';
 import type { LyricsProvider, LyricsProviderCapability, LyricsProviderResult, LyricsProviderSearchRequest } from './LyricsProvider';
 import {
@@ -39,7 +40,10 @@ const readTextFile = (filePath: string): string | null => {
       return null;
     }
 
-    return decodeTextFileBytes(readFileSync(filePath));
+    const bytes = readFileSync(filePath);
+    if (bytes.length > maxLyricsTextBytes) return null;
+    const decoded = extname(filePath).toLowerCase() === '.krc' ? decodeKrcFileBytes(bytes, maxLyricsTextBytes) : bytes;
+    return decoded ? decodeTextFileBytes(decoded) : null;
   } catch {
     return null;
   }
@@ -148,7 +152,7 @@ const secondaryPathsForPrimary = (candidate: LocalLyricsCandidate): SidecarSecon
 };
 
 const localLyricsSourceLabel = (extension: SidecarExtension, language?: string | null): string => {
-  const label = extension === '.ttml' ? 'Local TTML' : extension === '.lrc' ? 'Local LRC' : 'Local text';
+  const label = extension === '.txt' ? 'Local text' : `Local ${extension.slice(1).toUpperCase()}`;
   return language ? `${label} (${language})` : label;
 };
 
@@ -197,8 +201,11 @@ export class LocalLyricsProvider implements LyricsProvider {
   }
 
   getLyrics(query: LyricsQuery): TrackLyrics | null {
-    const [candidate] = this.searchCandidates(query);
-    return candidate ? this.getLyricsFromCandidate(query, candidate) : null;
+    for (const candidate of this.searchCandidates(query)) {
+      const lyrics = this.getLyricsFromCandidate(query, candidate);
+      if (lyrics) return lyrics;
+    }
+    return null;
   }
 
   getResultFromCandidate(query: LyricsQuery, candidate: LocalLyricsCandidate): LyricsProviderResult | null {
@@ -206,6 +213,8 @@ export class LocalLyricsProvider implements LyricsProvider {
     if (!raw) {
       return null;
     }
+
+    if (candidate.extension !== '.txt' && candidate.extension !== '.lrc' && parseSyncedLyrics(raw).length === 0) return null;
 
     const secondaryPaths = secondaryPathsForPrimary(candidate);
     const translationLyrics = secondaryPaths.translation ? readTextFile(secondaryPaths.translation) : null;
@@ -240,7 +249,8 @@ export class LocalLyricsProvider implements LyricsProvider {
 
     return sidecarPrimaries(query.filePath)
       .map((primary): LocalLyricsCandidate => {
-        const reasons = localSidecarReasons(query, primary.file.extension, readTextFile(primary.file.filePath));
+        const raw = readTextFile(primary.file.filePath);
+        const reasons = localSidecarReasons(query, primary.file.extension, raw);
         return {
           id: randomUUID(),
           provider: 'local',

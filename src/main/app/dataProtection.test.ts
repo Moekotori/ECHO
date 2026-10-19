@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
+import { app } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createManualLibraryDatabaseSnapshot,
@@ -132,16 +133,58 @@ describe('dataProtection', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('pins userData to a stable appData folder', () => {
+  it('pins community userData to its own stable appData folder', () => {
     const calls: Array<[string, string]> = [];
     const fakeApp = {
       getPath: (name: string) => (name === 'appData' ? tempDir : join(tempDir, 'Wrong Product Name')),
       setPath: (name: string, value: string) => calls.push([name, value]),
     };
 
-    expect(getProtectedUserDataPath(fakeApp)).toBe(join(tempDir, 'ECHO NEXT'));
-    expect(initializeProtectedUserDataPath(fakeApp)).toBe(join(tempDir, 'ECHO NEXT'));
-    expect(calls).toEqual([['userData', join(tempDir, 'ECHO NEXT')]]);
+    expect(getProtectedUserDataPath(fakeApp)).toBe(join(tempDir, 'ECHO Community'));
+    expect(initializeProtectedUserDataPath(fakeApp)).toBe(join(tempDir, 'ECHO Community'));
+    expect(calls).toEqual([['userData', join(tempDir, 'ECHO Community')]]);
+  });
+
+  it('isolates portable community data from the shared portable data root', () => {
+    const portableRoot = join(tempDir, 'data');
+    mkdirSync(portableRoot);
+    writeFileSync(join(portableRoot, 'echo-library.sqlite'), 'other edition library');
+    const fakeApp = {
+      getPath: (name: string) => name === 'exe' ? join(tempDir, 'ECHO.exe') : tempDir,
+      setPath: vi.fn(),
+    };
+
+    const communityPath = join(portableRoot, 'ECHO Community');
+    expect(initializeProtectedUserDataPath(fakeApp)).toBe(communityPath);
+    expect(fakeApp.setPath).toHaveBeenCalledWith('userData', communityPath);
+    expect(existsSync(join(communityPath, 'echo-library.sqlite'))).toBe(false);
+    expect(readText(join(portableRoot, 'echo-library.sqlite'))).toBe('other edition library');
+  });
+
+  it('does not automatically migrate libraries or settings from other editions', async () => {
+    const communityPath = join(tempDir, 'ECHO Community');
+    mkdirSync(communityPath);
+    const otherEditions = ['ECHO NEXT', 'echo-next', 'ECHO', 'ECHO Steam', 'ECHO Shared'];
+    for (const edition of otherEditions) {
+      const directory = join(tempDir, edition);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'echo-library.sqlite'), 'other edition library');
+      writeFileSync(join(directory, 'echo-settings.json'), '{"theme":"dark"}');
+    }
+    const getPath = vi.spyOn(app, 'getPath').mockImplementation((name) =>
+      name === 'exe' ? join(tempDir, 'app', 'ECHO.exe') : tempDir,
+    );
+    try {
+      const result = await migrateLegacyProtectedData(communityPath);
+      expect(result.sourcePath).toBeNull();
+      expect(result.migrated).toEqual([]);
+      expect(readdirSync(communityPath)).toEqual([]);
+      for (const edition of otherEditions) {
+        expect(readText(join(tempDir, edition, 'echo-library.sqlite'))).toBe('other edition library');
+      }
+    } finally {
+      getPath.mockRestore();
+    }
   });
 
   it('allows an explicit userData override for isolated first-run simulations', () => {

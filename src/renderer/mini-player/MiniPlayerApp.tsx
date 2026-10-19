@@ -365,8 +365,20 @@ export const MiniPlayerApp = (): JSX.Element => {
   const statusVolume = volumeFromStatus(activeAudioStatus, playbackStatus);
   latestStatusVolumeRef.current = statusVolume;
   const visualState = activeAudioStatus?.state ?? playbackStatus?.state ?? 'idle';
-  const statusTrackId = activeAudioStatus?.currentTrackId ?? playbackStatus?.currentTrackId ?? null;
-  const statusFilePath = activeAudioStatus?.currentFilePath ?? playbackStatus?.filePath ?? null;
+  const selectedQueueTrack = queueTracks.find((track) => track.id === queueSession?.currentTrackId) ??
+    (queueSession?.lastPlayedTrack?.id === queueSession?.currentTrackId ? queueSession?.lastPlayedTrack : null);
+  // A stopped host may retain its previous file. It is not an active playback
+  // identity: show the selected queue entry, as the main window does.
+  const selectedQueueMatchesStatus = Boolean(selectedQueueTrack && (
+    selectedQueueTrack.id === (activeAudioStatus?.currentTrackId ?? playbackStatus?.currentTrackId) ||
+    selectedQueueTrack.path === (activeAudioStatus?.currentFilePath ?? playbackStatus?.filePath)
+  ));
+  const showQueueSelection = Boolean(selectedQueueTrack && !selectedQueueMatchesStatus &&
+    !['loading', 'playing', 'paused'].includes(visualState));
+  const presentedAudioStatus = showQueueSelection ? null : activeAudioStatus;
+  const presentedPlaybackStatus = showQueueSelection ? null : playbackStatus;
+  const statusTrackId = presentedAudioStatus?.currentTrackId ?? presentedPlaybackStatus?.currentTrackId ?? null;
+  const statusFilePath = presentedAudioStatus?.currentFilePath ?? presentedPlaybackStatus?.filePath ?? null;
   const statusMatchedTrack =
     (statusTrackId
       ? queueTracks.find((track) => track.id === statusTrackId) ??
@@ -386,21 +398,21 @@ export const MiniPlayerApp = (): JSX.Element => {
   const filePath = currentTrack?.path ?? statusFilePath;
   const title =
     currentTrack?.title?.trim() ||
-    activeAudioStatus?.currentTrackTitle?.trim() ||
+    presentedAudioStatus?.currentTrackTitle?.trim() ||
     (filePath ? titleFromPath(filePath) : t('miniPlayer.status.ready'));
   const artist =
     currentTrack?.artist?.trim() ||
     currentTrack?.albumArtist?.trim() ||
-    activeAudioStatus?.currentTrackArtist?.trim() ||
-    activeAudioStatus?.currentTrackAlbumArtist?.trim() ||
+    presentedAudioStatus?.currentTrackArtist?.trim() ||
+    presentedAudioStatus?.currentTrackAlbumArtist?.trim() ||
     (filePath ? t('miniPlayer.artist.unknown') : '');
-  const artworkUrl = lightweightArtworkUrl(currentTrack, activeAudioStatus);
+  const artworkUrl = lightweightArtworkUrl(currentTrack, presentedAudioStatus);
   const durationSeconds = Math.max(
     0,
-    activeAudioStatus?.durationSeconds ??
-      (playbackStatus?.durationMs ? playbackStatus.durationMs / 1000 : currentTrack?.duration ?? 0),
+    presentedAudioStatus?.durationSeconds ??
+      (presentedPlaybackStatus?.durationMs ? presentedPlaybackStatus.durationMs / 1000 : currentTrack?.duration ?? 0),
   );
-  const sourcePositionSeconds = Math.max(0, activeAudioStatus?.positionSeconds ?? (playbackStatus?.positionMs ?? 0) / 1000);
+  const sourcePositionSeconds = Math.max(0, presentedAudioStatus?.positionSeconds ?? (presentedPlaybackStatus?.positionMs ?? 0) / 1000);
   const positionSeconds = seekPreviewSeconds ?? sourcePositionSeconds;
   const progress = durationSeconds > 0 ? clamp(positionSeconds / durationSeconds, 0, 1) : 0;
   const hasPlayableTarget = Boolean(filePath || currentTrack || statusTrackId || statusFilePath);

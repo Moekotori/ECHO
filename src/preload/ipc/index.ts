@@ -24,3 +24,6 @@ export { createDiscordPresenceApi } from './ipcDiscordPresence';
 export { createStageBridgeApi } from './ipcStageBridge';
 export { createEchoLinkApi } from './ipcEchoLink';
 export { createMqttIntegrationApi } from './ipcMqttIntegration';
+
+export { createStreamingApi } from './streamingApi';
+export { createSpotifyApi } from './ipcSpotify';

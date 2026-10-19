@@ -4,6 +4,8 @@ import { IpcChannels } from '../shared/constants/ipcChannels';
 import type { DesktopEchoApi, RemovedDesktopNamespace } from './apiTypes';
 import {
   createAppApi,
+  createStreamingApi,
+  createSpotifyApi,
   createDesktopLyricsApi,
   createMiniPlayerApi,
   createPetApi,
@@ -30,6 +32,8 @@ import {
 // ---------------------------------------------------------------------------
 const expectedNamespaces = [
   'app',
+  'streaming',
+  'spotify',
   'desktopLyrics',
   'miniPlayer',
   'pet',
@@ -87,6 +91,8 @@ function buildEchoApi(): DesktopEchoApi {
   };
 
   return {
+    streaming: createStreamingApi(ipcRenderer, IpcChannels),
+    spotify: createSpotifyApi(ipcRenderer, IpcChannels),
     app: createAppApi(ipcRenderer, IpcChannels),
     desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
     miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels),

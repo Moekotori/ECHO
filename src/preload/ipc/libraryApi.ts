@@ -26,6 +26,7 @@ export function createLibraryApi(
       return ipcRenderer.invoke(IpcChannels.LibraryImportDroppedFiles, payload);
     },
     getFolders: () => ipcRenderer.invoke(IpcChannels.LibraryGetFolders),
+    getSongFilterGenres: (source) => ipcRenderer.invoke(IpcChannels.LibraryGetSongFilterGenres, source),
     importAudioFiles: (paths) => ipcRenderer.invoke(IpcChannels.LibraryImportAudioFiles, paths),
     planAlbumSplit: (albumId, options) => ipcRenderer.invoke(IpcChannels.LibraryPlanAlbumSplit, albumId, options),
     startAlbumSplit: (request) => ipcRenderer.invoke(IpcChannels.LibraryStartAlbumSplit, request),

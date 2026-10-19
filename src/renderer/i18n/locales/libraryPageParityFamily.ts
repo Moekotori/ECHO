@@ -1,0 +1,86 @@
+export const libraryPageParityZhCN = {
+  "library.sort.direction.aria": "排序方向",
+  "library.sort.direction.asc": "升序",
+  "library.sort.direction.desc": "降序",
+  "library.folderFilter.label": "筛选",
+  "library.folderFilter.recentlyAdded": "本次新增",
+  "library.folderFilter.unplayed": "未播放",
+  "library.folderFilter.lossless": "无损",
+  "library.folderFilter.hiRes": "Hi-Res",
+  "library.folderFilter.missingCover": "缺少封面",
+  "library.folderFilter.missingLyrics": "缺少歌词",
+  "library.folderFilter.duplicates": "重复歌曲",
+  "library.folderFilter.loading": "正在分析重复歌曲…",
+  "library.folderFilter.hideDuplicates": "隐藏重复歌曲",
+  "library.folderFilter.lyricsHint": "按曲库歌词缓存筛选，不会扫描或修改原始媒体文件。",
+} as const;
+
+export const libraryPageParityZhTW = {
+  "library.sort.direction.aria": "排序方向",
+  "library.sort.direction.asc": "升冪",
+  "library.sort.direction.desc": "降冪",
+  "library.folderFilter.label": "篩選",
+  "library.folderFilter.recentlyAdded": "本次新增",
+  "library.folderFilter.unplayed": "未播放",
+  "library.folderFilter.lossless": "無損",
+  "library.folderFilter.hiRes": "Hi-Res",
+  "library.folderFilter.missingCover": "缺少封面",
+  "library.folderFilter.missingLyrics": "缺少歌詞",
+  "library.folderFilter.duplicates": "重複歌曲",
+  "library.folderFilter.loading": "正在分析重複歌曲…",
+  "library.folderFilter.hideDuplicates": "隱藏重複歌曲",
+  "library.folderFilter.lyricsHint": "依曲庫歌詞快取篩選，不會掃描或修改原始媒體檔案。",
+} as const;
+
+export const libraryPageParityEnUS = {
+  "library.sort.direction.aria": "Sort direction",
+  "library.sort.direction.asc": "Ascending",
+  "library.sort.direction.desc": "Descending",
+  "library.folderFilter.label": "Filter",
+  "library.folderFilter.recentlyAdded": "Recently added",
+  "library.folderFilter.unplayed": "Unplayed",
+  "library.folderFilter.lossless": "Lossless",
+  "library.folderFilter.hiRes": "Hi-Res",
+  "library.folderFilter.missingCover": "Missing cover",
+  "library.folderFilter.missingLyrics": "Missing lyrics",
+  "library.folderFilter.duplicates": "Duplicates",
+  "library.folderFilter.loading": "Analyzing duplicates…",
+  "library.folderFilter.hideDuplicates": "Hide duplicate tracks",
+  "library.folderFilter.lyricsHint": "Filters the library lyrics cache; original media files are not scanned or modified.",
+} as const;
+
+export const libraryPageParityJaJP = {
+  "library.sort.direction.aria": "並べ替え方向",
+  "library.sort.direction.asc": "昇順",
+  "library.sort.direction.desc": "降順",
+  "library.folderFilter.label": "絞り込み",
+  "library.folderFilter.recentlyAdded": "今回追加",
+  "library.folderFilter.unplayed": "未再生",
+  "library.folderFilter.lossless": "ロスレス",
+  "library.folderFilter.hiRes": "Hi-Res",
+  "library.folderFilter.missingCover": "カバーなし",
+  "library.folderFilter.missingLyrics": "歌詞なし",
+  "library.folderFilter.duplicates": "重複曲",
+  "library.folderFilter.loading": "重複を解析中…",
+  "library.folderFilter.hideDuplicates": "重複曲を非表示",
+  "library.folderFilter.lyricsHint": "ライブラリの歌詞キャッシュで絞り込みます。元のメディアファイルは走査・変更しません。",
+} as const;
+
+export const libraryPageParityKoKR = {
+  "library.sort.direction.aria": "정렬 방향",
+  "library.sort.direction.asc": "오름차순",
+  "library.sort.direction.desc": "내림차순",
+  "library.folderFilter.label": "필터",
+  "library.folderFilter.recentlyAdded": "최근 추가",
+  "library.folderFilter.unplayed": "미재생",
+  "library.folderFilter.lossless": "무손실",
+  "library.folderFilter.hiRes": "Hi-Res",
+  "library.folderFilter.missingCover": "표지 없음",
+  "library.folderFilter.missingLyrics": "가사 없음",
+  "library.folderFilter.duplicates": "중복 곡",
+  "library.folderFilter.loading": "중복 분석 중…",
+  "library.folderFilter.hideDuplicates": "중복 곡 숨기기",
+  "library.folderFilter.lyricsHint": "라이브러리 가사 캐시로 필터링하며 원본 미디어 파일을 스캔하거나 수정하지 않습니다.",
+} as const;
+
+export type LibraryPageParityTranslationKey = keyof typeof libraryPageParityZhCN;

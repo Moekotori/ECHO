@@ -5,7 +5,7 @@ import { networkInterfaces } from 'node:os';
 import { basename, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
-import sharp from 'sharp';
+import sharp from '../images/sharpRuntime';
 import type { ConnectHttpDebugEvent } from '../../shared/types/connect';
 import { resolveFfmpegToolchain } from '../audioPublicApi';
 import { registerSoftMemoryCleanupTask, type SoftMemoryCleanupTaskResult } from '../diagnostics/SoftMemoryJanitor';

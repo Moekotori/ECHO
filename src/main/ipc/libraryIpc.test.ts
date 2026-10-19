@@ -1686,6 +1686,17 @@ describe('library IPC', () => {
     expect(service.deleteTracks).not.toHaveBeenCalled();
   });
 
+  it('preserves combined song filters and sort priorities while bounding invalid values', async () => {
+    const service = installLibraryService();
+    await handlers[IpcChannels.LibraryGetTracks]!(null, {
+      sorts: ['artistDesc', 'albumDesc', 'not-a-sort', 'artistDesc'], fileFormatFilter: 'flac',
+      folderIds: ['folder-1', 42, 'folder-1'], filterYear: 2026, filterGenre: ' Jazz ',
+    });
+    expect(service.getTracksAsync).toHaveBeenCalledWith({
+      sorts: ['artistDesc', 'albumDesc'], fileFormatFilter: 'flac', folderIds: ['folder-1'], filterYear: 2026, filterGenre: 'Jazz',
+    });
+  });
+
   it('accepts file modified and artist-album sorting for songs and albums', async () => {
     const service = installLibraryService();
 

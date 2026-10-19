@@ -1,3 +1,4 @@
+import { closeDefaultStreamingService } from '../streaming/StreamingService';
 import { app, BrowserWindow, dialog } from 'electron';
 import { createMainWindow } from './createMainWindow';
 import { requestAppQuit } from './tray';
@@ -510,6 +511,7 @@ export const registerAppLifecycle = (): void => {
     disposeBackgroundPlaybackShortcuts();
     closeDefaultLyricsService();
     closeDefaultMvService();
+    closeDefaultStreamingService();
     closeDefaultRemoteSourceService();
     await closeDefaultLibraryService();
     const manager = getLibraryDatabaseManager();

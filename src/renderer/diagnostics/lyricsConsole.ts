@@ -1,3 +1,4 @@
+import { LyricsLogDedupe } from './lyricsLogDedupe';
 type LyricsConsoleLevel = 'info' | 'warn';
 
 type LyricsConsoleOptions = {
@@ -6,7 +7,7 @@ type LyricsConsoleOptions = {
   dedupeMs?: number;
 };
 
-const lastLogAtByKey = new Map<string, number>();
+const logDedupe = new LyricsLogDedupe();
 
 const formatLyricsConsolePayload = (payload: Record<string, unknown>): string => {
   try {
@@ -32,14 +33,8 @@ export const logLyricsConsole = (
   }
 
   const dedupeKey = options.dedupeKey;
-  if (dedupeKey) {
-    const now = Date.now();
-    const lastLogAt = lastLogAtByKey.get(dedupeKey) ?? 0;
-    if (now - lastLogAt < (options.dedupeMs ?? 1000)) {
-      return;
-    }
-
-    lastLogAtByKey.set(dedupeKey, now);
+  if (dedupeKey && !logDedupe.shouldLog(dedupeKey, options.dedupeMs ?? 1000)) {
+    return;
   }
 
   const level = options.level ?? 'info';
