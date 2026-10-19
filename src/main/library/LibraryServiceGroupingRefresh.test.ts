@@ -40,6 +40,11 @@ class FakeStore {
     return work();
   }
 
+  async refreshGroupingCooperatively(_service: unknown, options: { includeAlbums?: boolean } = {}): Promise<void> {
+    if (options.includeAlbums !== false) this.refreshAlbums();
+    this.refreshArtists();
+  }
+
   refreshAlbums(): void {
     this.refreshAlbumsCalls += 1;
     if (this.shouldThrowRefresh) {
