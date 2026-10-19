@@ -1264,18 +1264,18 @@ export class ScanJobQueue {
           await yieldToMainLoop();
         };
 
-        this.store.transaction(() => {
-          this.store.upsertScanDirectorySnapshots(folder.id, directorySnapshots, timestamp);
-
-          if (markMissing) {
-            removedTracks = this.store.markTracksMissingFromFolder(
-              folder.id,
-              [...(markMissingDiscoveredPaths ?? files.map((file) => file.path)), ...protectedPaths],
-              timestamp,
-              { excludeDirectories: inaccessibleDirectories },
-            );
-          }
-        });
+        this.store.upsertScanDirectorySnapshots(folder.id, directorySnapshots, timestamp);
+        if (markMissing) {
+          const discoveredPaths = function* (): Generator<string> {
+            if (markMissingDiscoveredPaths) yield* markMissingDiscoveredPaths;
+            else for (const file of files) yield file.path;
+            yield* protectedPaths;
+          };
+          removedTracks = await this.store.markTracksMissingFromFolderCooperatively(
+            folder.id, discoveredPaths(), timestamp,
+            { excludeDirectories: inaccessibleDirectories }, () => this.throwIfCancelled(jobId),
+          );
+        }
         await yieldToMainLoop();
 
         for (let index = 0; index < coverRepairItems.length;) {

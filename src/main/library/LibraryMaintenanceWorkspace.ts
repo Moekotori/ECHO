@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,18 +12,19 @@ export class LibraryMaintenanceInterrupted extends Error {
 /** Disk-backed staging on the existing writer; no second SQLite writer or long JS transaction. */
 export class LibraryMaintenanceWorkspace {
   private readonly root = mkdtempSync(join(tmpdir(), 'echo-library-maintenance-'));
+  private readonly schema = `echo_library_work_${randomUUID().replaceAll('-', '')}`;
   private expectedChanges = 0;
   private readonly version: number;
 
   constructor(private readonly database: EchoDatabase) {
     try {
-      database.prepare('ATTACH DATABASE ? AS echo_library_work').run(join(this.root, 'staging.sqlite'));
-      database.exec('PRAGMA echo_library_work.cache_size = -4096');
-      database.exec('PRAGMA echo_library_work.journal_mode = OFF');
+      database.prepare(`ATTACH DATABASE ? AS ${this.schema}`).run(join(this.root, 'staging.sqlite'));
+      database.exec(`PRAGMA ${this.schema}.cache_size = -4096`);
+      database.exec(`PRAGMA ${this.schema}.journal_mode = OFF`);
       this.version = this.dataVersion();
       this.expectedChanges = this.changes();
     } catch (error) {
-      try { database.exec('DETACH DATABASE echo_library_work'); } catch { /* Attach may have failed. */ }
+      try { database.exec(`DETACH DATABASE ${this.schema}`); } catch { /* Attach may have failed. */ }
       rmSync(this.root, { recursive: true, force: true });
       throw error;
     }
@@ -30,7 +32,7 @@ export class LibraryMaintenanceWorkspace {
 
   table(name: string): string {
     if (!/^[a-z_]+$/u.test(name)) throw new Error('Invalid maintenance table');
-    return `echo_library_work.${name}`;
+    return `${this.schema}.${name}`;
   }
 
   snapshot(name: string, sql: string): void {
@@ -64,8 +66,7 @@ export class LibraryMaintenanceWorkspace {
   }
 
   publish(includeAlbums: boolean): void {
-    this.check();
-    this.database.transaction(() => {
+    this.commit(() => {
       this.database.exec('DELETE FROM artist_tracks; DELETE FROM artist_albums; DELETE FROM artists');
       if (includeAlbums) this.database.exec(`
         DELETE FROM album_tracks; DELETE FROM albums;
@@ -77,11 +78,16 @@ export class LibraryMaintenanceWorkspace {
         INSERT INTO artist_tracks SELECT * FROM ${this.table('artist_tracks')};
         INSERT INTO artist_albums SELECT * FROM ${this.table('artist_albums')};
       `);
-    })();
+    });
+  }
+
+  commit(work: () => void): void {
+    this.check();
+    this.database.transaction(work)();
   }
 
   close(): void {
-    try { if (this.database.open) this.database.exec('DETACH DATABASE echo_library_work'); }
+    try { if (this.database.open) this.database.exec(`DETACH DATABASE ${this.schema}`); }
     finally { rmSync(this.root, { recursive: true, force: true }); }
   }
 

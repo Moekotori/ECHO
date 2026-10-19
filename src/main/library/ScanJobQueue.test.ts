@@ -246,6 +246,14 @@ class FakeStore {
     return work();
   }
 
+  async markTracksMissingFromFolderCooperatively(
+    folderId: string, paths: Iterable<string>, timestamp?: string,
+    options: { excludeDirectories?: readonly string[] } = {}, check: () => void = () => undefined,
+  ): Promise<number> {
+    check();
+    return this.markTracksMissingFromFolder(folderId, Array.from(paths), timestamp, options);
+  }
+
   markTracksMissingFromFolder(
     _folderId: string,
     discoveredPaths: string[],
