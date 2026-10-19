@@ -2282,6 +2282,7 @@ export class AudioSession extends EventEmitter {
     this.decoder = dependencies.decoder ?? new DecoderPipeline({
       logger: this.logger,
       getSpawnEnv: () => buildNetworkProxyEnv(getAppSettings()),
+      inspectToolchainAsync: true,
     });
     this.automixAnalyzer = dependencies.automixAnalyzer ?? new AutomixAnalyzer({
       logger: this.logger,
@@ -2930,6 +2931,12 @@ export class AudioSession extends EventEmitter {
     this.emitStatus();
 
     try {
+      if (this.decoder.ensureToolchainReady) {
+        await runPlaybackPerformanceStep('AudioSession.playLocalFile', 'await FFmpeg toolchain', playbackPerfDetails(), () =>
+          this.decoder.ensureToolchainReady!(),
+        );
+        this.assertCurrentRun(token);
+      }
       const preparedProbe = this.takePreparedLocalProbe(request, this.currentOutputSettings);
       if (preparedProbe) {
         this.verboseLogger(JSON.stringify({

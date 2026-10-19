@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Captions, Download, FilePlus2, FolderPlus, Headphones, Music2, Settings } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import type { AppRoute } from '../../app/routes';
 import type { SidebarRouteId } from '../../../shared/types/sidebar';
+import { normalizeSidebarHiddenRouteIds } from '../../../shared/types/sidebar';
 import { I18nProvider } from '../../i18n/I18nProvider';
+import { loadTranslations } from '../../i18n/locales';
+import { pendingSettingsSectionStorageKey } from '../../pages/settings/settingsNavigation';
 
 const routes: AppRoute[] = [
   {
@@ -75,6 +78,11 @@ const routes: AppRoute[] = [
   },
 ];
 
+beforeAll(async () => {
+  window.localStorage.setItem('echo-next.locale', 'en-US');
+  await loadTranslations('en-US');
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -90,8 +98,8 @@ describe('Sidebar direct import actions', () => {
     iconOnly?: boolean;
     hiddenRouteIds?: AppRoute['id'][];
     onToggleIconOnly?: () => void;
-    onHideRoute?: (routeId: AppRoute['id']) => void;
-    onShowRoute?: (routeId: AppRoute['id']) => void;
+    onHideRoute?: (routeId: SidebarRouteId) => void;
+    onShowRoute?: (routeId: SidebarRouteId) => void;
   }): ReturnType<typeof render> => {
     return render(
       <I18nProvider>
@@ -179,7 +187,7 @@ describe('Sidebar direct import actions', () => {
 
   it('renders one icon shell for each visible route', () => {
     const { container } = renderSidebar({ onRouteChange: vi.fn(), onImportFolder: vi.fn(), onImportFile: vi.fn() });
-    const visibleRouteCount = routes.filter((route) => !route.hideFromSidebar).length;
+    const visibleRouteCount = routes.filter((route) => !route.hideFromSidebar).length + 1;
 
     expect(container.querySelectorAll('.nav-icon-shell')).toHaveLength(visibleRouteCount);
   });
@@ -278,5 +286,45 @@ describe('Sidebar direct import actions', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: /隐藏|闅愯棌/u }));
 
     expect(onHideRoute).toHaveBeenCalledWith('osu-downloader');
+  });
+
+  it('hides the Steam edition shortcut and restores it through edit mode', async () => {
+    const onRouteChange = vi.fn();
+    const onShowRoute = vi.fn();
+    let savedHiddenRouteIds: SidebarRouteId[] = [];
+    const onHideRoute = vi.fn((routeId: SidebarRouteId) => {
+      savedHiddenRouteIds = normalizeSidebarHiddenRouteIds([routeId]);
+    });
+    const props = { onRouteChange, onHideRoute, onShowRoute, onImportFolder: vi.fn(), onImportFile: vi.fn() };
+    renderSidebar(props);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Steam edition' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '隐藏' }));
+    expect(onHideRoute).toHaveBeenCalledWith('steam-edition');
+    expect(savedHiddenRouteIds).toContain('steam-edition');
+    expect(onRouteChange).not.toHaveBeenCalled();
+
+    cleanup();
+    renderSidebar({ ...props, hiddenRouteIds: savedHiddenRouteIds });
+    expect(screen.queryByRole('button', { name: 'Steam edition' })).toBeNull();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '进入编辑模式' }));
+    const hiddenShortcut = screen.getByRole('button', { name: '显示Steam edition' });
+    expect(hiddenShortcut.getAttribute('data-hidden')).toBe('true');
+    fireEvent.click(hiddenShortcut);
+    expect(onShowRoute).toHaveBeenCalledWith('steam-edition');
+    expect(onRouteChange).not.toHaveBeenCalled();
+  });
+
+  it('opens Steam settings from the Steam edition shortcut', () => {
+    const onRouteChange = vi.fn();
+    renderSidebar({ onRouteChange, onImportFolder: vi.fn(), onImportFile: vi.fn() });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Steam edition' }));
+
+    expect(onRouteChange).toHaveBeenCalledWith('settings');
+    expect(window.sessionStorage.getItem(pendingSettingsSectionStorageKey)).toBe('steam');
+    window.sessionStorage.removeItem(pendingSettingsSectionStorageKey);
   });
 });

@@ -20,7 +20,8 @@ import type { resolveEchoSrcFirBackendStatus } from './EchoSrcFirEngine';
 export type DecoderPipelineLike = Pick<DecoderPipeline, 'probeLocalFile' | 'decodeLocalFile'> & {
   decodeAutomixPair?: DecoderPipeline['decodeAutomixPair'];
   decodeGaplessSequence?: DecoderPipeline['decodeGaplessSequence'];
-  getToolchainInfo?: () => FfmpegToolchainDiagnostics;
+  getToolchainInfo?: () => FfmpegToolchainDiagnostics | null;
+  ensureToolchainReady?: () => Promise<void>;
 };
 
 export type AutomixAnalyzerLike = Pick<AutomixAnalyzer, 'analyze'>

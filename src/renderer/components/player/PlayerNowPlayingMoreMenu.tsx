@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { MoreHorizontal } from 'lucide-react';
 import type { EditableTrackTags, LibraryPlaylist, LibraryTrack } from '../../../shared/types/library';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
 import { openAlbumDetailForTrack } from '../../utils/albumNavigation';
@@ -17,6 +18,7 @@ type PlayerNowPlayingMoreMenuProps = {
   onTrackUpdated?: (track: LibraryTrack) => void;
   suppressOpen?: boolean;
   track: LibraryTrack | null;
+  useLegacyIcons?: boolean;
 };
 
 type MenuState = {
@@ -34,6 +36,7 @@ export const PlayerNowPlayingMoreMenu = ({
   onTrackUpdated,
   suppressOpen = false,
   track,
+  useLegacyIcons = false,
 }: PlayerNowPlayingMoreMenuProps): JSX.Element => {
   const t = useOptionalI18n()?.t ?? translateFallback;
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -205,7 +208,7 @@ export const PlayerNowPlayingMoreMenu = ({
         title={moreLabel}
         onClick={toggleMenu}
       >
-        <PlayerControlIcon name="more" />
+        {useLegacyIcons ? <MoreHorizontal size={20} strokeWidth={1.8} aria-hidden="true" /> : <PlayerControlIcon name="more" />}
       </button>
       {menu?.track ? (
         <TrackContextMenu

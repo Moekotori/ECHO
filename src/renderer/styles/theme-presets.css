@@ -15097,12 +15097,12 @@ html[data-theme-mode="ambient"] .songs-page .track-row[data-playing="true"] {
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--theme-accent-bg) 34%, transparent),
-      color-mix(in srgb, var(--theme-accent-bg) 12%, transparent) 18%,
-      transparent 56%
+      color-mix(in srgb, var(--theme-accent-bg) 18%, transparent),
+      color-mix(in srgb, var(--theme-accent-bg) 6%, transparent) 18%,
+      transparent 44%
     ),
     transparent;
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--theme-accent-solid-bg) 58%, transparent);
+  box-shadow: none;
 }
 
 html .songs-page .track-row[data-selected="true"],
@@ -15115,12 +15115,12 @@ html[data-theme-mode="ambient"] .songs-page .track-row[data-selected="true"] {
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--theme-accent-bg) 72%, transparent),
-      color-mix(in srgb, var(--theme-accent-bg) 30%, transparent) 34%,
-      transparent 80%
+      color-mix(in srgb, var(--theme-accent-bg) 36%, transparent),
+      color-mix(in srgb, var(--theme-accent-bg) 12%, transparent) 34%,
+      transparent 70%
     ),
     transparent;
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--theme-accent-solid-bg) 72%, transparent);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--theme-accent-solid-bg) 34%, transparent);
 }
 
 html .songs-page .track-row[data-drop-target="true"],
@@ -15150,12 +15150,12 @@ html[data-theme-mode="ambient"] .songs-page .track-row[data-selected="true"]:hov
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--theme-accent-bg) 84%, transparent),
-      color-mix(in srgb, var(--theme-accent-bg) 36%, transparent) 38%,
-      transparent 82%
+      color-mix(in srgb, var(--theme-accent-bg) 44%, transparent),
+      color-mix(in srgb, var(--theme-accent-bg) 16%, transparent) 38%,
+      transparent 72%
     ),
     transparent;
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--theme-accent-solid-bg) 82%, transparent);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--theme-accent-solid-bg) 40%, transparent);
 }
 
 html .playlists-page .track-list-shell,

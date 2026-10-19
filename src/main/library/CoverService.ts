@@ -5,6 +5,7 @@ import type { EchoDatabase } from '../database/createDatabase';
 import { COVER_CACHE_VERSION } from './libraryTypes';
 import type { CoverResult, CoverSource, ParsedTrackMetadata } from './libraryTypes';
 import { TsCoverExtractor } from './workers/TsCoverExtractor';
+import { registerSoftMemoryCleanupTask, type SoftMemoryCleanupTaskResult } from '../diagnostics/SoftMemoryJanitor';
 
 const coverSourceRank: Record<CoverSource, number> = {
   default: 0,
@@ -173,11 +174,13 @@ type RemoteCoverWorkerSlot = {
 export type CoverServiceOptions = {
   remoteCoverPoolSize?: number;
   remoteCoverTaskTimeoutMs?: number;
+  remoteCoverIdleWorkerTimeoutMs?: number;
   remoteCoverWorkerFactory?: RemoteCoverWorkerFactory;
 };
 
 const defaultRemoteCoverPoolSize = 16;
 const defaultRemoteCoverTaskTimeoutMs = 30_000;
+const defaultRemoteCoverIdleWorkerTimeoutMs = 120_000;
 
 const normalizeRemoteCoverPoolSize = (value: unknown): number => {
   const numeric = Number(value);
@@ -190,12 +193,13 @@ const normalizeRemoteCoverPoolSize = (value: unknown): number => {
 class RemoteCoverWorkerPool {
   private readonly poolSize: number;
   private readonly taskTimeoutMs: number;
+  private readonly idleWorkerTimeoutMs: number;
   private readonly workerFactory: RemoteCoverWorkerFactory;
   private readonly workers: RemoteCoverWorkerSlot[] = [];
   private readonly queue: QueuedRemoteCoverTask[] = [];
   private nextRequestId = 1;
   private closed = false;
-  private started = false;
+  private idleTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly cacheRoot: string,
@@ -203,6 +207,7 @@ class RemoteCoverWorkerPool {
   ) {
     this.poolSize = normalizeRemoteCoverPoolSize(options.remoteCoverPoolSize);
     this.taskTimeoutMs = Math.max(1, Math.round(options.remoteCoverTaskTimeoutMs ?? defaultRemoteCoverTaskTimeoutMs));
+    this.idleWorkerTimeoutMs = Math.max(0, Math.round(options.remoteCoverIdleWorkerTimeoutMs ?? defaultRemoteCoverIdleWorkerTimeoutMs));
     this.workerFactory =
       options.remoteCoverWorkerFactory ??
       ((source, workerOptions) => new Worker(source, workerOptions) as RemoteCoverWorkerLike);
@@ -221,7 +226,7 @@ class RemoteCoverWorkerPool {
         reject,
         timeout: null,
       });
-      this.ensureStarted();
+      this.clearIdleTimer();
       this.pump();
     });
   }
@@ -232,6 +237,7 @@ class RemoteCoverWorkerPool {
     }
 
     this.closed = true;
+    this.clearIdleTimer();
     const closeError = new Error('Remote cover worker pool is closed');
     for (const task of this.queue.splice(0)) {
       task.reject(closeError);
@@ -242,15 +248,36 @@ class RemoteCoverWorkerPool {
     }
   }
 
-  private ensureStarted(): void {
-    if (this.started || this.closed) {
-      return;
+  releaseIdleWorkers(): SoftMemoryCleanupTaskResult {
+    const beforeEntries = this.workers.length;
+    // Do not disturb active work or make queued work pay for a cold start.
+    if (!this.closed && this.queue.length === 0 && this.workers.every((slot) => !slot.currentTask)) {
+      this.clearIdleTimer();
+      for (const slot of [...this.workers]) {
+        this.retireWorker(slot, new Error('Remote cover worker released while idle'));
+      }
     }
+    return {
+      task: 'remote-cover-workers',
+      beforeEntries,
+      afterEntries: this.workers.length,
+      removedEntries: beforeEntries - this.workers.length,
+    };
+  }
 
-    this.started = true;
-    while (this.workers.length < this.poolSize) {
-      this.createWorker();
-    }
+  private clearIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private scheduleIdleRetirement(): void {
+    if (!this.idleWorkerTimeoutMs || this.idleTimer || this.closed || this.queue.length > 0 ||
+      this.workers.length === 0 || this.workers.some((slot) => slot.currentTask)) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.releaseIdleWorkers();
+    }, this.idleWorkerTimeoutMs);
+    this.idleTimer.unref?.();
   }
 
   private createWorker(): void {
@@ -285,12 +312,26 @@ class RemoteCoverWorkerPool {
       return;
     }
 
-    this.ensureStarted();
+    // Grow with actual demand. A single image must not start all 16 isolates.
+    let idleWorkers = this.workers.filter((slot) => !slot.currentTask).length;
+    while (this.queue.length > idleWorkers && this.workers.length < this.poolSize) {
+      try {
+        this.createWorker();
+        idleWorkers += 1;
+      } catch (error) {
+        if (this.workers.length === 0) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          for (const task of this.queue.splice(0)) task.reject(failure);
+        }
+        break;
+      }
+    }
     for (const slot of this.workers) {
       if (!slot.currentTask && this.queue.length > 0) {
         this.dispatch(slot, this.queue.shift()!);
       }
     }
+    this.scheduleIdleRetirement();
   }
 
   private dispatch(slot: RemoteCoverWorkerSlot, task: QueuedRemoteCoverTask): void {
@@ -341,7 +382,6 @@ class RemoteCoverWorkerPool {
     this.retireWorker(slot, error);
 
     if (!this.closed) {
-      this.createWorker();
       this.pump();
     }
   }
@@ -360,7 +400,11 @@ class RemoteCoverWorkerPool {
       task.reject(error);
     }
 
-    void Promise.resolve(slot.worker.terminate()).catch(() => undefined);
+    try {
+      void Promise.resolve(slot.worker.terminate()).catch(() => undefined);
+    } catch {
+      // The slot has already relinquished task ownership.
+    }
   }
 
   private clearTaskTimeout(task: QueuedRemoteCoverTask): void {
@@ -374,6 +418,7 @@ class RemoteCoverWorkerPool {
 export class CoverService {
   private readonly extractor = new TsCoverExtractor();
   private readonly remoteCoverWorkerPool: RemoteCoverWorkerPool;
+  private readonly unregisterSoftMemoryCleanup: () => void;
 
   constructor(
     private readonly database: EchoDatabase,
@@ -381,6 +426,10 @@ export class CoverService {
     options: CoverServiceOptions = {},
   ) {
     this.remoteCoverWorkerPool = new RemoteCoverWorkerPool(cacheRoot, options);
+    this.unregisterSoftMemoryCleanup = registerSoftMemoryCleanupTask(
+      `remote-cover-workers:${randomUUID()}`,
+      () => this.remoteCoverWorkerPool.releaseIdleWorkers(),
+    );
   }
 
   async ensureCover(filePath: string, metadata: ParsedTrackMetadata, now = new Date().toISOString()): Promise<string | null> {
@@ -411,6 +460,7 @@ export class CoverService {
   }
 
   close(): void {
+    this.unregisterSoftMemoryCleanup();
     this.remoteCoverWorkerPool.close();
   }
 

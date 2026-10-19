@@ -1,9 +1,8 @@
 import { pinyin } from 'pinyin-pro';
+import { librarySortTextCache as sortKeyCache } from './libraryTextCaches';
 
 const hanRunPattern = /\p{Script=Han}+/gu;
 const combiningMarkPattern = /[\u0300-\u036f]/gu;
-const maxSortKeyCacheEntries = 4096;
-const sortKeyCache = new Map<string, string>();
 
 const normalizeSortText = (value: string): string =>
   value
@@ -25,7 +24,7 @@ export const libraryTextSortKey = (value: unknown): string => {
   }
 
   const cached = sortKeyCache.get(text);
-  if (cached !== undefined) {
+  if (cached !== undefined && cached !== null) {
     return cached;
   }
 
@@ -38,12 +37,6 @@ export const libraryTextSortKey = (value: unknown): string => {
     ),
   );
 
-  if (sortKeyCache.size >= maxSortKeyCacheEntries) {
-    const oldestKey = sortKeyCache.keys().next().value as string | undefined;
-    if (oldestKey) {
-      sortKeyCache.delete(oldestKey);
-    }
-  }
   sortKeyCache.set(text, sortKey);
   return sortKey;
 };

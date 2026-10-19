@@ -14,6 +14,7 @@ it('stops hidden route preloads and restarts unfinished requests when returning'
   const images: Array<{ src: string; onload: unknown; onerror: unknown }> = [];
   vi.stubGlobal('Image', class {
     src = ''; onload = null; onerror = null;
+    removeAttribute(): void { this.src = ''; }
     constructor() { images.push(this); }
   });
   let active = true;
@@ -21,7 +22,7 @@ it('stops hidden route preloads and restarts unfinished requests when returning'
   const tracks = [{ id: 'activity-cover', mediaType: 'remote', coverThumb: 'echo-image://subsonic-cover/activity-cover' }] as LibraryTrack[];
   const options = { active: true, tracks, visibleTrackIds: ['activity-cover'] };
   const { rerender } = renderHook(() => useRemoteCoverPreloader(options), { wrapper });
-  act(() => vi.advanceTimersByTime(80));
+  act(() => vi.advanceTimersByTime(120));
   expect(images).toHaveLength(1);
   expect(images[0].src).toBe(tracks[0].coverThumb);
   active = false; rerender();
@@ -30,7 +31,7 @@ it('stops hidden route preloads and restarts unfinished requests when returning'
   act(() => vi.advanceTimersByTime(5000));
   expect(images).toHaveLength(1);
   active = true; rerender();
-  act(() => vi.advanceTimersByTime(80));
+  act(() => vi.advanceTimersByTime(120));
   expect(images).toHaveLength(2);
   expect(images[1].src).toBe(tracks[0].coverThumb);
 });

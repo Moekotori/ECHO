@@ -1,9 +1,9 @@
-import OpenCC from 'opencc-js';
+import { getOpenCCConverter } from '../text/openccConverters';
 
 const toMainlandChinese = [
-  OpenCC.Converter({ from: 'tw', to: 'cn' }),
-  OpenCC.Converter({ from: 'hk', to: 'cn' }),
-  OpenCC.Converter({ from: 'jp', to: 'cn' }),
+  getOpenCCConverter('tw', 'cn'),
+  getOpenCCConverter('hk', 'cn'),
+  getOpenCCConverter('jp', 'cn'),
 ] as const;
 
 export const normalizeMvSemanticText = (value: string | null | undefined): string =>

@@ -22,6 +22,7 @@ export const sidebarRouteIds = [
   'lyrics-settings',
   'import-folder',
   'import-file',
+  'steam-edition',
 ] as const;
 
 export type SidebarRouteId = typeof sidebarRouteIds[number];

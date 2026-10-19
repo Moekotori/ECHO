@@ -1132,41 +1132,39 @@ export class NeteaseStreamingProvider implements StreamingProvider {
 
     const userId = await this.resolveUserId(cookie);
     const ncm = getNcmApi();
-    const bodies: unknown[] = [];
+    const limit = 1000;
+    const readPages = async (fetchPage: (offset: number) => Promise<unknown>): Promise<StreamingAccountPlaylist[]> => {
+      const playlists = new Map<string, StreamingAccountPlaylist>();
+      for (let offset = 0; ; offset += limit) {
+        const body = asRecord(await fetchPage(offset));
+        assertNeteaseWriteSuccess(body);
+        const records = neteasePlaylistRecords(body);
+        const previousSize = playlists.size;
+        for (const record of records) {
+          const playlist = mapNeteaseAccountPlaylist(record, userId);
+          if (playlist) playlists.set(playlist.providerPlaylistId, playlist);
+        }
+        const more = body.more ?? asRecord(body.data).more;
+        if (more === false || (more !== true && records.length < limit)) return [...playlists.values()];
+        if (playlists.size === previousSize) throw new Error('网易云歌单分页未返回新内容，请稍后重试。');
+      }
+    };
 
     if (ncm?.user_playlist) {
       try {
-        bodies.push((await ncm.user_playlist({ uid: userId, limit: 1000, offset: 0, cookie })).body);
+        return await readPages(async (offset) => (await ncm.user_playlist!({ uid: userId, limit, offset, cookie })).body);
       } catch {
-        // Fall back to the public endpoint below.
+        // Retry the complete list through the public endpoint if the SDK fails.
       }
     }
 
-    try {
-      const params = new URLSearchParams({ uid: userId, limit: '1000', offset: '0', includeVideo: 'true' });
-      bodies.push(
-        await jsonFetch(`https://music.163.com/api/user/playlist?${params.toString()}`, {
-          headers: neteaseHeaders(cookie),
-          timeoutMs: 12_000,
-        }),
-      );
-    } catch (error) {
-      if (bodies.length === 0) {
-        throw error;
-      }
-    }
-
-    const playlists = new Map<string, StreamingAccountPlaylist>();
-    for (const body of bodies) {
-      for (const record of neteasePlaylistRecords(body)) {
-        const playlist = mapNeteaseAccountPlaylist(record, userId);
-        if (playlist && !playlists.has(playlist.providerPlaylistId)) {
-          playlists.set(playlist.providerPlaylistId, playlist);
-        }
-      }
-    }
-
-    return [...playlists.values()];
+    return readPages((offset) => {
+      const params = new URLSearchParams({ uid: userId, limit: String(limit), offset: String(offset), includeVideo: 'true' });
+      return jsonFetch(`https://music.163.com/api/user/playlist?${params.toString()}`, {
+        headers: neteaseHeaders(cookie),
+        timeoutMs: 12_000,
+      });
+    });
   }
 
   async setTrackLiked(input: { providerTrackId: string; liked: boolean }): Promise<void> {

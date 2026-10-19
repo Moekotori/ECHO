@@ -480,40 +480,54 @@ describe('HomePage', () => {
     }
   });
 
-  it('loads only the lightweight library summary while playback is already playing', () => {
-    vi.useFakeTimers();
-    const library = installLibraryMock();
-    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
-
-    try {
-      render(<HomePage />);
-
-      expect(library.getSummary).toHaveBeenCalledTimes(1);
-      expect(library.getTracks).not.toHaveBeenCalled();
-      expect(library.getAlbums).not.toHaveBeenCalled();
-      expect(library.getPlaybackHistory).not.toHaveBeenCalled();
-    } finally {
-      cleanup();
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps the home song count synchronized with library changes during playback', async () => {
+  it('loads recent albums and playback activity while playback is already playing', async () => {
     const library = installLibraryMock();
     sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
 
     render(<HomePage />);
 
+    await waitForRecentPanelReady();
+    expect(await within(document.querySelector('.home-recent-panel') as HTMLElement).findByRole('button', { name: /Daily Album One/ })).toBeTruthy();
+    await waitFor(() => expect(library.getPlaybackHistorySummary).toHaveBeenCalled());
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
+    expect((document.querySelector('.home-recent-panel .home-activity-actions button:last-child') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('fills the summary-only cache when playback finishes loading', async () => {
+    const library = installLibraryMock();
+    sharedPlaybackState.value.audioStatus = { state: 'loading' } as AudioStatus;
+    const view = render(<HomePage />);
+
+    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('12'));
+    expect(library.getAlbums).not.toHaveBeenCalled();
+    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
+    view.rerender(<HomePage />);
+
+    expect(await within(document.querySelector('.home-recent-panel') as HTMLElement).findByRole('button', { name: /Daily Album One/ })).toBeTruthy();
+    await waitFor(() => expect(library.getPlaybackHistorySummary).toHaveBeenCalled());
+  });
+
+  it('keeps recent albums synchronized with library changes during playback', async () => {
+    const library = installLibraryMock();
+    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
+
+    render(<HomePage />);
+
+    await waitForRecentPanelReady();
+    await waitFor(() => expect(library.getPlaybackStatsDashboard).toHaveBeenCalled());
     await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('12'));
     vi.mocked(library.getSummary).mockClear();
+    vi.mocked(library.getAlbums).mockClear();
+    vi.mocked(library.getPlaybackHistory).mockClear();
     vi.mocked(library.getSummary).mockResolvedValue(summary({ songCount: 37 }));
+    vi.mocked(library.getAlbums).mockResolvedValue(page([album('fresh-playing', { title: 'Added During Playback' })]));
 
     window.dispatchEvent(new Event('library:changed'));
 
+    expect(await within(document.querySelector('.home-recent-panel') as HTMLElement).findByRole('button', { name: /Added During Playback/ })).toBeTruthy();
     await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('37'));
     expect(library.getSummary).toHaveBeenCalledTimes(1);
-    expect(library.getTracks).not.toHaveBeenCalled();
-    expect(library.getAlbums).not.toHaveBeenCalled();
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
     expect(library.getPlaybackHistory).not.toHaveBeenCalled();
   });
 
@@ -786,8 +800,9 @@ describe('HomePage', () => {
     expect(getPlaybackStatsDashboard).toHaveBeenCalledTimes(playbackStatsDashboardCallsBeforeRefresh);
   });
 
-  it('refreshes recent activity from the panel action', async () => {
+  it('refreshes recent activity from the panel action during playback', async () => {
     const library = installLibraryMock();
+    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
 
     render(<HomePage />);
 
@@ -826,9 +841,7 @@ describe('HomePage', () => {
     expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
     expect(library.getPlaybackHistory).toHaveBeenCalledWith({ page: 1, pageSize: 12, sort: 'recent' });
     expect(library.getPlaybackHistorySummary).toHaveBeenCalledTimes(1);
-    expect(library.getPlaybackStatsDashboard).toHaveBeenCalledTimes(2);
     expect(library.getPlaybackStatsDashboard).toHaveBeenCalledWith(expect.objectContaining({ statsMode: 'activity' }));
-    expect(library.getPlaybackStatsDashboard).toHaveBeenCalledWith({});
     expect(library.getAlbumForTrack).toHaveBeenCalledWith('panel-history');
   });
 
@@ -1895,8 +1908,9 @@ describe('HomePage', () => {
     expect(library.getPlaybackStatsDashboard).not.toHaveBeenCalled();
   });
 
-  it('refreshes recently played album cards and weekly stats on playback history changes', async () => {
+  it('refreshes recently played album cards and weekly stats on playback history changes during playback', async () => {
     const library = installLibraryMock();
+    sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
     vi.mocked(library.getAlbumForTrack).mockImplementation(async (trackId: string) => {
       if (trackId === 'history-new') {
         return album('played-album-new', { title: 'Fresh Played Album', albumArtist: 'Fresh Artist', coverId: 'fresh-played-cover' });

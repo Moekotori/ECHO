@@ -1,6 +1,7 @@
 import { withJapaneseSearchRomanizer } from './JapaneseSearchRomanizer';
 export { preloadSearchIndexRomanizer } from './JapaneseSearchRomanizer';
 import { pinyin } from 'pinyin-pro';
+import { libraryJapaneseConversionCache as japaneseConversionCache } from './libraryTextCaches';
 
 export type SearchIndexTrackFields = {
   title: string;
@@ -23,9 +24,6 @@ const maxPinyinWindow = 6;
 const maxInitialWindow = 12;
 const maxRomajiWindow = 8;
 const maxRomanizationInputLength = 512;
-const maxRomanizationCacheEntries = 4096;
-
-const japaneseConversionCache = new Map<string, string | null>();
 
 const normalizeSearchText = (value: string): string => value.normalize('NFKC').trim().toLocaleLowerCase();
 
@@ -41,12 +39,6 @@ export const hasJapaneseSearchText = (fields: SearchIndexTrackFields): boolean =
   ].some((value) => typeof value === 'string' && japanesePattern.test(value));
 
 const rememberJapaneseConversion = (key: string, value: string | null): string | null => {
-  if (japaneseConversionCache.size >= maxRomanizationCacheEntries) {
-    const oldestKey = japaneseConversionCache.keys().next().value as string | undefined;
-    if (oldestKey) {
-      japaneseConversionCache.delete(oldestKey);
-    }
-  }
   japaneseConversionCache.set(key, value);
   return value;
 };
@@ -78,9 +70,8 @@ const convertJapaneseText = async (value: string, target: 'romaji' | 'hiragana' 
   }
 
   const cacheKey = `${target}:${normalized}`;
-  if (japaneseConversionCache.has(cacheKey)) {
-    return japaneseConversionCache.get(cacheKey) ?? null;
-  }
+  const cached = japaneseConversionCache.get(cacheKey);
+  if (cached !== undefined) return cached;
 
   return withJapaneseSearchRomanizer(async (kuroshiro) => {
     if (!kuroshiro) {

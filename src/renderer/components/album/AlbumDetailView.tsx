@@ -28,6 +28,7 @@ import { AlbumTrackList } from './AlbumTrackList';
 type AlbumDetailViewProps = {
   album: LibraryAlbum;
   onBack: () => void;
+  onEscapeBack?: () => void;
 };
 
 const isAlbumDetailTestRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
@@ -782,7 +783,7 @@ const formatReleaseVersionMeta = (version: NonNullable<AlbumOnlineInfo['releaseV
     .filter((item): item is string => Boolean(item))
     .join(' - ');
 
-export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.Element => {
+export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailViewProps): JSX.Element => {
   const { locale, t } = useI18n();
   const { appendToQueue, appendTracksToQueue, currentTrackId, playTrack, playTrackNext, removeTrackFromQueue, replaceQueue, updateTrackSnapshot } = usePlaybackQueue();
   const audioPlaybackState = useSharedAudioPlaybackState();
@@ -792,6 +793,7 @@ export const AlbumDetailView = ({ album, onBack }: AlbumDetailViewProps): JSX.El
   const { isReturning, returnBack } = useAnimatedBackNavigation(onBack, true, {
     durationMs: 80,
     rootRef: detailRootRef,
+    onEscapeBack,
   });
   const [firstTrack, setFirstTrack] = useState<LibraryTrack | null>(null);
   const [loadedTracks, setLoadedTracks] = useState<LibraryTrack[]>([]);

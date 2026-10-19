@@ -1161,7 +1161,7 @@ export const SongsPage = (): JSX.Element => {
   }, [handleLoadMore, handleLoadPrevious, hasMore, isLoading, loadedStartIndex]);
 
   const handleImportFolder = (): void => {
-    window.dispatchEvent(new Event('app:navigate:import-folder'));
+    window.dispatchEvent(new Event('app:import-folder'));
   };
 
   const handleImportFile = (): void => {

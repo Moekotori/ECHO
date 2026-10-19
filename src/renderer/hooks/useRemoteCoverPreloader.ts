@@ -4,6 +4,7 @@ import type { RemoteCoverLoadPerformanceMode, AppSettings } from '../../shared/t
 import type { LibraryTrack } from '../../shared/types/library';
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import { getAppBridge } from '../utils/echoBridge';
+import { preloadRemoteCoverUrls } from './remoteCoverPreload';
 
 type RemoteCoverLoadPlan = {
   leadRows: number;
@@ -33,24 +34,24 @@ export const remoteCoverLoadPlans: Record<RemoteCoverLoadPerformanceMode, Remote
     delayMs: 240,
   },
   balanced: {
-    leadRows: 72,
-    maxPreloadUrls: 80,
-    maxHydrateTracks: 32,
+    leadRows: 24,
+    maxPreloadUrls: 32,
+    maxHydrateTracks: 16,
     concurrency: 3,
-    delayMs: 80,
+    delayMs: 120,
   },
   aggressive: {
-    leadRows: 220,
-    maxPreloadUrls: 240,
-    maxHydrateTracks: 96,
-    concurrency: 8,
-    delayMs: 30,
+    leadRows: 96,
+    maxPreloadUrls: 128,
+    maxHydrateTracks: 64,
+    concurrency: 6,
+    delayMs: 60,
   },
   lan: {
-    leadRows: 1400,
-    maxPreloadUrls: 1600,
-    maxHydrateTracks: 900,
-    concurrency: 32,
+    leadRows: 320,
+    maxPreloadUrls: 320,
+    maxHydrateTracks: 160,
+    concurrency: 8,
     delayMs: 0,
   },
 };
@@ -220,7 +221,7 @@ export const useRemoteCoverPreloader = ({
     const missingCoverIds = hydrateMissingCovers
       ? missingRemoteCoverTrackIds(candidates, plan.maxHydrateTracks)
       : [];
-    const activeImages = new Set<HTMLImageElement>();
+    let cancelPreload: (() => void) | undefined;
     let cancelled = false;
 
     const runPreload = (): void => {
@@ -232,59 +233,14 @@ export const useRemoteCoverPreloader = ({
         hydrateMissingCovers?.(missingCoverIds);
       }
 
-      if (typeof Image === 'undefined' || urls.length === 0) {
-        return;
-      }
-
-      let nextIndex = 0;
-      let activeCount = 0;
-      const pump = (): void => {
-        if (cancelled) {
-          return;
-        }
-
-        while (activeCount < plan.concurrency && nextIndex < urls.length) {
-          const url = urls[nextIndex];
-          nextIndex += 1;
-          activeCount += 1;
-
-          const image = new Image();
-          activeImages.add(image);
-          let settled = false;
-          const finish = (): void => {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            image.onload = null;
-            image.onerror = null;
-            activeImages.delete(image);
-            activeCount -= 1;
-            pump();
-          };
-          image.onload = (): void => {
-            rememberPreloadedUrl(url);
-            finish();
-          };
-          image.onerror = finish;
-          image.decoding = 'async';
-          image.src = url;
-        }
-      };
-
-      pump();
+      cancelPreload = preloadRemoteCoverUrls(urls, { concurrency: plan.concurrency, rememberUrl: rememberPreloadedUrl });
     };
 
     const timer = window.setTimeout(runPreload, plan.delayMs);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      for (const image of activeImages) {
-        image.onload = null;
-        image.onerror = null;
-        image.src = '';
-      }
-      activeImages.clear();
+      cancelPreload?.();
     };
   }, [active, hydrateMissingCovers, isRouteActive, mode, tracks, visibleTrackIds, visibleTrackIdsKey]);
 

@@ -497,7 +497,8 @@ const isPlaybackPriorityActiveState = (status: AudioStatus | null | undefined): 
   visualActiveStates.has(status?.state ?? 'idle');
 
 const isPlaybackPriorityBlockingState = (status: AudioStatus | null | undefined): boolean =>
-  visualActiveStates.has(status?.state ?? 'idle');
+  // Home reads can run during steady playback; only defer across track loading.
+  status?.state === 'loading';
 
 const recentPlayedAlbumsFromHistory = (entries: PlaybackHistoryEntry[]): RecentPlayedAlbum[] => {
   const seenAlbumKeys = new Set<string>();
@@ -760,10 +761,8 @@ const hasCachedPlaybackPulseData = (data: HomePageData | null): boolean =>
   ));
 
 const hasCachedLibraryPulseData = (data: HomePageData | null): boolean =>
+  // The lightweight summary alone does not populate the recent/recommended shelves.
   Boolean(data && (
-    data.summary.songCount > 0 ||
-    data.summary.albumCount > 0 ||
-    data.summary.artistCount > 0 ||
     data.recentTracks.length > 0 ||
     data.recentAddedAlbums.length > 0 ||
     data.recommendedAlbums.length > 0
@@ -2459,7 +2458,8 @@ export const HomePage = (): JSX.Element => {
     const scheduledRefreshes: Array<() => void> = [];
     if (!hasCachedLibraryPulseData(cachedHomePageData)) {
       scheduledRefreshes.push(scheduleHomeStartupWork(() => void loadLibraryPulse()));
-    } else if (!hasCachedPlaybackPulseData(cachedHomePageData) && !startupPlaybackPulseActiveRef.current && !libraryOnlyRefreshActiveRef.current) {
+    }
+    if (!hasCachedPlaybackPulseData(cachedHomePageData) && !startupPlaybackPulseActiveRef.current && !libraryOnlyRefreshActiveRef.current) {
       if (suppressNextPlaybackPulseAfterLibraryRefreshRef.current) {
         suppressNextPlaybackPulseAfterLibraryRefreshRef.current = false;
       } else {

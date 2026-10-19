@@ -16,6 +16,12 @@ vi.mock('electron', () => ({
 }));
 
 describe('app settings normalization', () => {
+  it('defaults lyrics mini-player auto hide on and preserves an explicit opt-out', async () => {
+    const { normalizeSettings } = await import('./appSettings');
+    expect(normalizeSettings({}).lyricsPlayerBarDrawerAutoHideEnabled).toBe(true);
+    expect(normalizeSettings({ lyricsPlayerBarDrawerAutoHideEnabled: false }).lyricsPlayerBarDrawerAutoHideEnabled).toBe(false);
+  });
+
   it('keeps the artwork MV entry opt-in and preserves its saved value', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
@@ -216,7 +222,7 @@ describe('app settings normalization', () => {
     expect(settings.lyricsEmptyStateHidden).toBe(true);
     expect(settings.lyricsPlayerBarDrawerEnabled).toBe(true);
     expect(settings.lyricsPlayerBarDrawerAutoEnableForMv).toBe(true);
-    expect(settings.lyricsPlayerBarDrawerAutoHideEnabled).toBe(false);
+    expect(settings.lyricsPlayerBarDrawerAutoHideEnabled).toBe(true);
     expect(settings.lyricsPlayerBarDrawerCompactOnIdleEnabled).toBe(false);
     expect(settings.lyricsPlayerBarDrawerOpacityPercent).toBe(78);
     expect(settings.lyricsPlayerBarDrawerColorMode).toBe('default');
@@ -1981,7 +1987,7 @@ describe('app settings normalization', () => {
       lyricsMvAutoShowTrackInfoDisabled: false,
       lyricsEmptyStateHidden: false,
       lyricsPlayerBarDrawerEnabled: true,
-      lyricsPlayerBarDrawerAutoHideEnabled: false,
+      lyricsPlayerBarDrawerAutoHideEnabled: true,
       lyricsPlayerBarDrawerCompactOnIdleEnabled: false,
       lyricsPlayerBarDrawerOpacityPercent: 100,
       lyricsPlayerBarDrawerColorMode: 'default',

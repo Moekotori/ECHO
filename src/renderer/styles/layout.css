@@ -492,17 +492,15 @@ html[data-theme="dark"] .app-shell--lyrics .window-control:hover {
 .lyrics-player-drawer-host--auto-hide,
 .lyrics-player-drawer-host--shortcut-toggle {
   transition:
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 180ms var(--echo-motion-ease-quick),
-    filter 180ms var(--echo-motion-ease-quick);
-  will-change: transform, opacity, filter;
+    transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 220ms var(--echo-motion-ease-quick);
+  will-change: transform, opacity;
 }
 
 .lyrics-player-drawer-host--auto-hidden {
   opacity: 0;
-  filter: blur(1px) saturate(0.96);
   pointer-events: none;
-  transform: translate3d(0, calc(100% + 18px), 0);
+  transform: translate3d(0, calc(100% + 48px), 0) scale(0.96);
 }
 
 .app-shell--lyrics-player-drawer .lyrics-player-drawer-host .player-bar {

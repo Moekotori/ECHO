@@ -15,6 +15,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
 type AnimatedBackNavigationOptions = {
   durationMs?: number;
   rootRef?: RefObject<HTMLElement | null>;
+  onEscapeBack?: () => void;
 };
 
 const isVisibleRouteSurface = (
@@ -34,14 +35,14 @@ export const useAnimatedBackNavigation = (
   options: AnimatedBackNavigationOptions = {},
 ) => {
   const [isReturning, setIsReturning] = useState(false);
-  const onBackRef = useRef(onBack);
+  const onBackRef = useRef({ onBack, onEscapeBack: options.onEscapeBack });
   const timeoutRef = useRef<number | null>(null);
   const durationMs = options.durationMs ?? defaultBackAnimationMs;
   const rootRef = options.rootRef;
 
   useEffect(() => {
-    onBackRef.current = onBack;
-  }, [onBack]);
+    onBackRef.current = { onBack, onEscapeBack: options.onEscapeBack };
+  }, [onBack, options.onEscapeBack]);
 
   useEffect(() => {
     if (!enabled) {
@@ -53,13 +54,18 @@ export const useAnimatedBackNavigation = (
     }
   }, [enabled]);
 
-  const returnBack = useCallback((): void => {
+  const animateBack = useCallback((source: 'back' | 'escape'): void => {
     if (!enabled) {
       return;
     }
 
+    const completeBack = (): void => {
+      const { onBack, onEscapeBack } = onBackRef.current;
+      (source === 'escape' ? onEscapeBack ?? onBack : onBack)();
+    };
+
     if (durationMs <= 0) {
-      onBackRef.current();
+      completeBack();
       return;
     }
 
@@ -70,12 +76,14 @@ export const useAnimatedBackNavigation = (
 
       timeoutRef.current = window.setTimeout(() => {
         timeoutRef.current = null;
-        onBackRef.current();
+        completeBack();
       }, durationMs);
 
       return true;
     });
   }, [durationMs, enabled]);
+
+  const returnBack = useCallback(() => animateBack('back'), [animateBack]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -88,12 +96,12 @@ export const useAnimatedBackNavigation = (
       }
 
       event.preventDefault();
-      returnBack();
+      animateBack('escape');
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [enabled, returnBack, rootRef]);
+  }, [animateBack, enabled, rootRef]);
 
   useEffect(
     () => () => {

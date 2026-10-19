@@ -855,16 +855,19 @@ describe('SongsPage', () => {
     expect(window.echo.library.toggleTrackLiked).not.toHaveBeenCalled();
   });
 
-  it('dispatches navigation from the import folder button', async () => {
-    installEcho();
-    const navigate = vi.fn();
-    window.addEventListener('app:navigate:import-folder', navigate);
+  it('dispatches direct folder import from both folder buttons', async () => {
+    installEcho([]);
+    const importFolder = vi.fn();
+    window.addEventListener('app:import-folder', importFolder);
 
     await renderSongsPage();
-    fireEvent.click(screen.getByRole('button', { name: '导入文件夹' }));
+    await screen.findByRole('button', { name: /导入音乐文件夹|Import Music Folder/ });
+    fireEvent.click(screen.getByRole('button', { name: /^(导入文件夹|Import Folder)$/ }));
+    expect(importFolder).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /导入音乐文件夹|Import Music Folder/ }));
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
-    window.removeEventListener('app:navigate:import-folder', navigate);
+    await waitFor(() => expect(importFolder).toHaveBeenCalledTimes(2));
+    window.removeEventListener('app:import-folder', importFolder);
   });
 
   it('dispatches file import from the import file toolbar button', async () => {

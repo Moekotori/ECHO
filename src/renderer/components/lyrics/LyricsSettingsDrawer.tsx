@@ -272,7 +272,7 @@ const fallbackSettings: LyricsDrawerSettings = {
   lyricsEmptyStateHidden: true,
   lyricsPlayerBarDrawerEnabled: true,
   lyricsPlayerBarDrawerAutoEnableForMv: true,
-  lyricsPlayerBarDrawerAutoHideEnabled: false,
+  lyricsPlayerBarDrawerAutoHideEnabled: true,
   lyricsPlayerBarDrawerShortcutEnabled: false,
   lyricsPlayerBarDrawerShortcutAccelerator: null,
   lyricsPlayerBarDrawerCompactOnIdleEnabled: false,
@@ -777,7 +777,7 @@ const selectLyricsSettings = (settings: AppSettings): LyricsDrawerSettings => ({
   lyricsEmptyStateHidden: settings.lyricsEmptyStateHidden,
   lyricsPlayerBarDrawerEnabled: settings.lyricsPlayerBarDrawerEnabled !== false,
   lyricsPlayerBarDrawerAutoEnableForMv: settings.lyricsPlayerBarDrawerAutoEnableForMv !== false,
-  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled === true,
+  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled !== false,
   lyricsPlayerBarDrawerShortcutEnabled: settings.lyricsPlayerBarDrawerShortcutEnabled === true,
   lyricsPlayerBarDrawerShortcutAccelerator:
     validateGlobalShortcutAccelerator(settings.lyricsPlayerBarDrawerShortcutAccelerator).accelerator,

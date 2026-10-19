@@ -10,12 +10,13 @@ type Props = {
   onOpenQueue?: () => void;
   sleepPanel?: (isVisible: boolean) => ReactNode;
   windowControls: ReactNode;
+  useLegacyIcons?: boolean;
 };
 
 type Pane = 'controls' | 'sleep' | 'tools';
 
 /** Presents existing host-backed controls in the Steam player's compact tabbed shell. */
-export const PlayerUtilitiesPopover = ({ children, isOpen, onOpenChange, onOpenQueue, sleepPanel, windowControls }: Props): JSX.Element => {
+export const PlayerUtilitiesPopover = ({ children, isOpen, onOpenChange, onOpenQueue, sleepPanel, windowControls, useLegacyIcons = false }: Props): JSX.Element => {
   const t = useOptionalI18n()?.t ?? translateFallback;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -60,7 +61,7 @@ export const PlayerUtilitiesPopover = ({ children, isOpen, onOpenChange, onOpenQ
       <button ref={buttonRef} className="icon-button" type="button" aria-label={label} title={label}
         aria-haspopup="dialog" aria-expanded={isOpen} aria-controls={panelId}
         onClick={() => onOpenChange(!isOpen)}>
-        <PlayerControlIcon name="controls" />
+        {useLegacyIcons ? <SlidersHorizontal size={20} strokeWidth={1.8} aria-hidden="true" /> : <PlayerControlIcon name="controls" />}
       </button>
       <div id={panelId} className="player-utilities-panel" role="dialog" aria-label={label} hidden={!isOpen}>
         <div className="player-utilities-tabs" role="tablist" aria-label={label}>

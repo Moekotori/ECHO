@@ -264,10 +264,10 @@ describe('theme presets stylesheet', () => {
       /html \.songs-page \.playing-dot,[\s\S]*?html\[data-theme-mode="ambient"\] \.songs-page \.playing-dot \{[\s\S]*?width: 6px;[\s\S]*?color-mix\(in srgb, var\(--theme-accent-bg\) 34%, transparent\);/,
     );
     expect(css).toMatch(
-      /html \.songs-page \.track-row\[data-playing="true"\],[\s\S]*?html\[data-theme-mode="ambient"\] \.songs-page \.track-row\[data-playing="true"\] \{[\s\S]*?color-mix\(in srgb, var\(--theme-accent-bg\) 34%, transparent\)[\s\S]*?box-shadow: inset 2px 0 0 color-mix\(in srgb, var\(--theme-accent-solid-bg\) 58%, transparent\);/,
+      /html \.songs-page \.track-row\[data-playing="true"\],[\s\S]*?html\[data-theme-mode="ambient"\] \.songs-page \.track-row\[data-playing="true"\] \{[\s\S]*?color-mix\(in srgb, var\(--theme-accent-bg\) 18%, transparent\)[\s\S]*?box-shadow: none;/,
     );
     expect(css).toMatch(
-      /html \.songs-page \.track-row\[data-selected="true"\],[\s\S]*?html\[data-theme-mode="ambient"\] \.songs-page \.track-row\[data-selected="true"\] \{[\s\S]*?color-mix\(in srgb, var\(--theme-accent-bg\) 72%, transparent\)[\s\S]*?box-shadow: inset 3px 0 0 color-mix\(in srgb, var\(--theme-accent-solid-bg\) 72%, transparent\);/,
+      /html \.songs-page \.track-row\[data-selected="true"\],[\s\S]*?html\[data-theme-mode="ambient"\] \.songs-page \.track-row\[data-selected="true"\] \{[\s\S]*?color-mix\(in srgb, var\(--theme-accent-bg\) 36%, transparent\)[\s\S]*?box-shadow: inset 1px 0 0 color-mix\(in srgb, var\(--theme-accent-solid-bg\) 34%, transparent\);/,
     );
   });
 

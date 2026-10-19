@@ -368,6 +368,9 @@ describe('PlayerBar', () => {
     expect(container.querySelector('.player-bar')?.getAttribute('data-compact-away')).toBeNull();
     expect(container.querySelector('.player-bar')?.getAttribute('data-layout-projection')).toBe('disabled');
     expect(container.querySelector('.player-compact-progress')).toBeNull();
+    expect(container.querySelector('.player-now-playing-more > button > svg')).toBeTruthy();
+    expect(container.querySelector('.player-utilities > button > svg')).toBeTruthy();
+    expect(container.querySelector('.output-status [data-player-control-icon]')).toBeNull();
 
     rerender(
       <I18nProvider>

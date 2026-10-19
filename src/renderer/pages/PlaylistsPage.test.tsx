@@ -293,6 +293,30 @@ afterEach(() => {
 });
 
 describe('PlaylistsPage detail links', () => {
+  it('searches the cover wall without reordering or changing the open playlist', async () => {
+    window.echo = {
+      library: {
+        getPlaylists: vi.fn().mockResolvedValue([playlist(), playlist({ id: 'night', name: 'Night Mix' })]),
+        getPlaylistItems: vi.fn().mockResolvedValue(page([])),
+        getLikedTrackIds: vi.fn().mockResolvedValue({}),
+      },
+      playback: { getStatus: vi.fn().mockResolvedValue({ state: 'idle', currentTrackId: null, positionMs: 0, durationMs: 0, filePath: null }) },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    const wall = document.querySelector('.playlist-list') as HTMLElement;
+    await within(wall).findByRole('button', { name: /Road Mix/ });
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索歌单' }), { target: { value: 'NIGHT' } });
+    expect(within(wall).queryByRole('button', { name: /Road Mix/ })).toBeNull();
+    const night = within(wall).getByRole('button', { name: /Night Mix/ });
+    expect(night.draggable).toBe(false);
+    expect(window.echo.library.getPlaylistItems).not.toHaveBeenCalledWith('night', expect.anything());
+    fireEvent.click(night);
+    expect(await screen.findByRole('heading', { name: 'Night Mix' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '返回歌单墙' }));
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    expect(within(wall).getByRole('button', { name: /Road Mix/ }).draggable).toBe(true);
+  });
+
   it('opens a playlist from the cover wall and returns to the wall', async () => {
     window.echo = {
       library: { getPlaylists: vi.fn().mockResolvedValue([playlist()]), getPlaylistItems: vi.fn().mockResolvedValue(page([item()])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
@@ -1006,9 +1030,9 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findAllByText('Road Mix');
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     const getPlaylistNames = (): string[] =>
-      Array.from(sidebar.querySelectorAll('.playlist-list-item strong span')).map((element) => element.textContent ?? '');
+      Array.from(sidebar.querySelectorAll('.playlist-wall-card strong span')).map((element) => element.textContent ?? '');
     const getPlaylistButton = (name: string): HTMLElement =>
-      Array.from(sidebar.querySelectorAll('.playlist-list-item')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
+      Array.from(sidebar.querySelectorAll('.playlist-wall-card')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
 
     await waitFor(() => expect(getPlaylistNames()).toEqual(['Road Mix', 'Night Mix', 'Morning Mix']));
 
@@ -1025,7 +1049,7 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findAllByText('Road Mix');
     const restoredSidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     await waitFor(() =>
-      expect(Array.from(restoredSidebar.querySelectorAll('.playlist-list-item strong span')).map((element) => element.textContent ?? '')).toEqual([
+      expect(Array.from(restoredSidebar.querySelectorAll('.playlist-wall-card strong span')).map((element) => element.textContent ?? '')).toEqual([
         'Night Mix',
         'Road Mix',
         'Morning Mix',
@@ -1058,7 +1082,7 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findAllByText('Road Mix');
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     const getPlaylistNames = (): string[] =>
-      Array.from(sidebar.querySelectorAll('.playlist-list-item strong span')).map((element) => element.textContent ?? '');
+      Array.from(sidebar.querySelectorAll('.playlist-wall-card strong span')).map((element) => element.textContent ?? '');
 
     await waitFor(() => expect(getPlaylistNames()).toEqual(['Road Mix', 'Cloud Mix']));
 
@@ -1106,6 +1130,10 @@ describe('PlaylistsPage actions menu', () => {
       provider: 'netease',
       providerPlaylistId: '1001',
     });
+    const syncLikedSongs = vi.fn().mockResolvedValue({
+      providers: [{ provider: 'netease', success: true, importedCount: 5, addedCount: 2, total: 5 }],
+    });
+    const dispatchEvent = vi.spyOn(window, 'dispatchEvent');
     window.echo = {
       app: {
         getSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: true }),
@@ -1121,26 +1149,68 @@ describe('PlaylistsPage actions menu', () => {
       streaming: {
         listAccountPlaylists,
         importPlaylistFromUrl,
+        syncLikedSongs,
       },
     } as unknown as Window['echo'];
 
     renderPlaylistsPage();
 
     await screen.findAllByText('Road Mix');
-    fireEvent.click(screen.getByRole('button', { name: '歌单类型筛选' }));
-    fireEvent.click(screen.getByRole('option', { name: '网易云' }));
     expect(listAccountPlaylists).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '同步' }));
+    fireEvent.click(screen.getByRole('button', { name: '同步流媒体歌单' }));
 
     await waitFor(() => expect(listAccountPlaylists).toHaveBeenCalledWith('netease'));
     await waitFor(() => expect(importPlaylistFromUrl).toHaveBeenCalledWith('https://music.163.com/#/playlist?id=1001'));
-    expect(await screen.findByText('已同步网易云歌单：1 个歌单 / 3 首')).toBeTruthy();
+    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('netease'));
+    expect(await screen.findByText(/已同步网易云歌单：1 个歌单 \/ 3 首.*网易云 我喜欢已同步：5 首，新增 2 首/)).toBeTruthy();
+    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'liked:tracks-changed' }));
+    expect(document.querySelector('.playlists-page')?.getAttribute('data-view')).toBe('wall');
 
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     await waitFor(() =>
-      expect(Array.from(sidebar.querySelectorAll('.playlist-list-item strong span')).map((element) => element.textContent ?? '')).toEqual(['Cloud Mix']),
+      expect(Array.from(sidebar.querySelectorAll('.playlist-wall-card strong span')).map((element) => element.textContent ?? '')).toEqual(['Road Mix', 'Cloud Mix']),
     );
+  });
+
+  it('waits for streaming consent before syncing account playlists and liked songs', async () => {
+    const listAccountPlaylists = vi.fn().mockResolvedValue({ provider: 'netease', playlists: [] });
+    const syncLikedSongs = vi.fn().mockResolvedValue({ providers: [{ provider: 'netease', success: true, importedCount: 0, addedCount: 0, total: 0 }] });
+    window.echo = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: false }),
+        setSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: true }),
+      },
+      library: { getPlaylists: vi.fn().mockResolvedValue([]), getPlaylistItems: vi.fn().mockResolvedValue(page([])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
+      streaming: { listAccountPlaylists, importPlaylistFromUrl: vi.fn(), syncLikedSongs },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    fireEvent.click(await screen.findByRole('button', { name: '同步流媒体歌单' }));
+    const dialog = await screen.findByRole('dialog', { name: '流媒体功能须知' });
+    expect(listAccountPlaylists).not.toHaveBeenCalled();
+    expect(syncLikedSongs).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '我同意' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '我同意并继续' }));
+    await waitFor(() => expect(listAccountPlaylists).toHaveBeenCalledWith('netease'));
+    await waitFor(() => expect(syncLikedSongs).toHaveBeenCalledWith('netease'));
+  });
+
+  it('reports account sync failures without showing a successful sync', async () => {
+    window.echo = {
+      app: { getSettings: vi.fn().mockResolvedValue({ streamingPlaylistImportNoticeAccepted: true }) },
+      library: { getPlaylists: vi.fn().mockResolvedValue([]), getPlaylistItems: vi.fn().mockResolvedValue(page([])), getLikedTrackIds: vi.fn().mockResolvedValue({}) },
+      streaming: {
+        listAccountPlaylists: vi.fn().mockRejectedValue(new Error('请先登录网易云音乐账号。')),
+        importPlaylistFromUrl: vi.fn(),
+        syncLikedSongs: vi.fn().mockResolvedValue({ providers: [{ provider: 'netease', success: false, error: '请先登录网易云音乐账号。' }] }),
+      },
+    } as unknown as Window['echo'];
+    renderPlaylistsPage();
+    await waitFor(() => expect(window.echo.app.getSettings).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole('button', { name: '同步流媒体歌单' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('请先登录网易云音乐账号。');
+    expect(screen.queryByText(/已同步网易云歌单/)).toBeNull();
+    expect((screen.getByRole('button', { name: '同步流媒体歌单' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('separates local and streaming playlist sidebar context menus', async () => {
@@ -1169,7 +1239,7 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findAllByText('Road Mix');
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     const getPlaylistButton = (name: string): HTMLElement =>
-      Array.from(sidebar.querySelectorAll('.playlist-list-item')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
+      Array.from(sidebar.querySelectorAll('.playlist-wall-card')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
 
     fireEvent.contextMenu(getPlaylistButton('Road Mix'), { clientX: 32, clientY: 48 });
     let menu = document.querySelector('.playlist-context-menu') as HTMLElement;
@@ -1205,7 +1275,7 @@ describe('PlaylistsPage actions menu', () => {
     const { container } = renderPlaylistsPage();
 
     await screen.findAllByText('Road Mix');
-    const playlistButton = container.querySelector('.playlist-list-item') as HTMLElement;
+    const playlistButton = container.querySelector('.playlist-wall-card') as HTMLElement;
     fireEvent.contextMenu(playlistButton, { clientX: 32, clientY: 48 });
 
     const layer = document.querySelector('.playlist-context-menu-layer') as HTMLElement;
@@ -1244,7 +1314,7 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findAllByText('Road Mix');
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     const getPlaylistButton = (name: string): HTMLElement =>
-      Array.from(sidebar.querySelectorAll('.playlist-list-item')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
+      Array.from(sidebar.querySelectorAll('.playlist-wall-card')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
 
     fireEvent.contextMenu(getPlaylistButton('Road Mix'), { clientX: 32, clientY: 48 });
     expect(within(document.querySelector('.playlist-context-menu') as HTMLElement).getByRole('menuitem', { name: '删除本地歌单' })).toBeTruthy();
@@ -1301,9 +1371,9 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findByText('Bilibili');
     const sidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     const getFavoriteNames = (): string[] =>
-      Array.from(sidebar.querySelectorAll('.playlist-list--favorites .playlist-list-item strong span')).map((element) => element.textContent ?? '');
+      Array.from(sidebar.querySelectorAll('.playlist-list--favorites .playlist-wall-card strong span')).map((element) => element.textContent ?? '');
     const getFavoriteButton = (name: string): HTMLElement =>
-      Array.from(sidebar.querySelectorAll('.playlist-list--favorites .playlist-list-item')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
+      Array.from(sidebar.querySelectorAll('.playlist-list--favorites .playlist-wall-card')).find((element) => element.querySelector('strong span')?.textContent === name) as HTMLElement;
 
     await waitFor(() => expect(getFavoriteNames()).toEqual(['Bilibili', 'YouTube', 'SoundCloud', 'YouTube Picks']));
 
@@ -1322,7 +1392,7 @@ describe('PlaylistsPage actions menu', () => {
     await screen.findByText('Bilibili');
     const restoredSidebar = document.querySelector('.playlist-sidebar') as HTMLElement;
     await waitFor(() =>
-      expect(Array.from(restoredSidebar.querySelectorAll('.playlist-list--favorites .playlist-list-item strong span')).map((element) => element.textContent ?? '')).toEqual([
+      expect(Array.from(restoredSidebar.querySelectorAll('.playlist-list--favorites .playlist-wall-card strong span')).map((element) => element.textContent ?? '')).toEqual([
         'YouTube',
         'Bilibili',
         'SoundCloud',

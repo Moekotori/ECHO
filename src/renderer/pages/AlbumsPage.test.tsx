@@ -293,7 +293,7 @@ describe('AlbumsPage', () => {
     window.removeEventListener('app:navigate:songs', navigateSongs);
   });
 
-  it('returns to home when an album detail was opened from the home page', async () => {
+  it.each(['button', 'Escape'])('returns to home via %s when an album detail was opened from the home page', async (trigger) => {
     const targetAlbum = album('1', { title: 'Dream within a dream' });
     const navigateRoute = vi.fn();
     const restoreHomeScroll = vi.fn();
@@ -311,7 +311,11 @@ describe('AlbumsPage', () => {
       await screen.findByText('Dream within a dream');
       window.dispatchEvent(new CustomEvent('app:navigate:album-detail', { detail: { album: targetAlbum, returnTo: 'home' } }));
       await screen.findByLabelText('Dream within a dream album details');
-      fireEvent.keyDown(window, { key: 'Escape' });
+      if (trigger === 'Escape') {
+        fireEvent.keyDown(window, { key: 'Escape' });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: /Albums/ }));
+      }
 
       await waitFor(() => expect(navigateRoute).toHaveBeenCalledWith(expect.objectContaining({ detail: 'home' })));
       await waitFor(() => expect(restoreHomeScroll).toHaveBeenCalledTimes(1));
@@ -336,11 +340,42 @@ describe('AlbumsPage', () => {
     await screen.findByText('Dream within a dream');
     window.dispatchEvent(new CustomEvent('app:navigate:album-detail', { detail: { album: targetAlbum, returnTo: 'folders' } }));
     await screen.findByLabelText('Dream within a dream album details');
-    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: /Albums/ }));
 
     await waitFor(() => expect(navigateRoute).toHaveBeenCalledWith(expect.objectContaining({ detail: 'folders' })));
     window.removeEventListener('app:navigate:route', navigateRoute);
   });
+
+  it.each(['songs', 'folders', 'playlists', 'history', undefined] as const)(
+    'returns to the album wall on Escape after opening from %s',
+    async (returnTo) => {
+      const targetAlbum = album('1', { title: 'Dream within a dream' });
+      installLibrary(vi.fn().mockResolvedValue(page([targetAlbum])));
+      const navigateRoute = vi.fn();
+      const navigateSongs = vi.fn();
+      window.addEventListener('app:navigate:route', navigateRoute);
+      window.addEventListener('app:navigate:songs', navigateSongs);
+
+      try {
+        const { container } = renderAlbumsPage();
+        await screen.findByText('Dream within a dream');
+        act(() => {
+          window.dispatchEvent(new CustomEvent('app:navigate:album-detail', { detail: { album: targetAlbum, returnTo } }));
+        });
+        await screen.findByLabelText('Dream within a dream album details');
+        fireEvent.keyDown(window, { key: 'Escape' });
+
+        await waitFor(() => expect(screen.queryByLabelText('Dream within a dream album details')).toBeNull());
+        expect(container.querySelector('.albums-page')?.getAttribute('data-detail-open')).toBe('false');
+        expect(screen.getByLabelText('Album list')).toBeTruthy();
+        expect(navigateRoute).not.toHaveBeenCalled();
+        expect(navigateSongs).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('app:navigate:route', navigateRoute);
+        window.removeEventListener('app:navigate:songs', navigateSongs);
+      }
+    },
+  );
 
   it('opens pending home album detail on first paint without exposing the album wall', () => {
     const targetAlbum = album('1', { title: 'Dream within a dream' });

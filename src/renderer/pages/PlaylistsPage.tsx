@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { AppSettings } from '../../shared/types/appSettings';
 import type { DownloadJob, DownloadJobStatus } from '../../shared/types/downloads';
 import type { LibraryPage, LibraryPlaylist, LibraryPlaylistItem, LibraryTrack, PlaylistExportFormat, PlaylistSortMode } from '../../shared/types/library';
-import type { StreamingAccountPlaylist, StreamingAudioQuality, StreamingFavoriteCollection, StreamingFavoriteProviderName, StreamingFavoritesSnapshot, StreamingFavoriteTrack, StreamingProviderName } from '../../shared/types/streaming';
+import type { StreamingAudioQuality, StreamingFavoriteCollection, StreamingFavoriteProviderName, StreamingFavoritesSnapshot, StreamingFavoriteTrack, StreamingProviderName } from '../../shared/types/streaming';
 import { streamingProviderNames, streamingStableKey } from '../../shared/types/streaming';
 import { TrackList } from '../components/library/TrackList';
 import { TrackContextMenu, type TrackMenuAction } from '../components/library/TrackContextMenu';
@@ -23,6 +23,7 @@ import { openAlbumDetailForTrack } from '../utils/albumNavigation';
 import { openArtistDetailForTrack } from '../utils/artistNavigation';
 import { requestStreamingAlbumDetailNavigation, requestStreamingArtistDetailNavigation } from '../utils/streamingDetailNavigation';
 import { PlaylistWallCover } from './playlists/PlaylistWallCover';
+import { syncNeteaseAccountPlaylists } from './playlists/syncNeteaseAccountPlaylists';
 import '../styles/playlists-cinematic.css';
 import '../styles/playlists-wall.css';
 
@@ -569,6 +570,7 @@ export const PlaylistsPage = (): JSX.Element => {
   const { t } = useI18n();
   const streamingAvailable = getStreamingBridge() !== null;
   const [detailOpen, setDetailOpen] = useState(false);
+  const [wallSearch, setWallSearch] = useState('');
   const [playlistPanelView, setPlaylistPanelView] = useState<'local' | 'streamingFavorites'>('local');
   const [playlistSourceFilter, setPlaylistSourceFilter] = useState<PlaylistSourceFilter>('all');
   const [playlists, setPlaylists] = useState<LibraryPlaylist[]>([]);
@@ -625,6 +627,7 @@ export const PlaylistsPage = (): JSX.Element => {
   const [draggedPlaylistItemId, setDraggedPlaylistItemId] = useState<string | null>(null);
   const [dropTargetPlaylistItemId, setDropTargetPlaylistItemId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const accountPlaylistSyncRunRef = useRef(false);
   const playlistDownloadRunIdRef = useRef(0);
   const notifiedDownloadJobIdsRef = useRef<Set<string>>(new Set());
   const newPlaylistInputRef = useRef<HTMLInputElement>(null);
@@ -1290,12 +1293,12 @@ export const PlaylistsPage = (): JSX.Element => {
   };
 
   const syncAccountPlaylistsForProvider = useCallback(async (provider: AccountPlaylistSyncProvider): Promise<void> => {
+    if (provider !== 'netease' || accountPlaylistSyncRunRef.current) return;
     const streaming = getStreamingBridge();
-    if (!streaming?.listAccountPlaylists || !streaming.importPlaylistFromUrl || syncingAccountPlaylistProvider) {
-      return;
-    }
+    if (!streaming) return;
 
-    const providerLabel = t(provider === 'netease' ? 'playlistsPage.filter.netease' : 'playlistsPage.filter.qqmusic');
+    accountPlaylistSyncRunRef.current = true;
+    const providerLabel = t('playlistsPage.filter.netease');
     setSyncingAccountPlaylistProvider(provider);
     setError(null);
     setSpotifyPlaylistHelpUrl(null);
@@ -1303,87 +1306,30 @@ export const PlaylistsPage = (): JSX.Element => {
     setAccountPlaylistSyncMessage(t('playlistsPage.status.syncingAccountPlaylists', { provider: providerLabel }));
 
     try {
-      const result = await streaming.listAccountPlaylists(provider);
-      const playlistsToSync: StreamingAccountPlaylist[] = result.playlists.filter((playlist) => playlist.webUrl.trim().length > 0);
-      setAccountPlaylistSyncMessage(t('playlistsPage.status.syncingAccountPlaylistsProgress', { provider: providerLabel, current: 0, total: playlistsToSync.length }));
-
-      if (playlistsToSync.length === 0) {
-        await loadPlaylists();
-        const message = t('playlistsPage.status.noAccountPlaylists', { provider: providerLabel });
-        setAccountPlaylistSyncMessage(message);
-        return;
-      }
-
-      let syncedPlaylists = 0;
-      let failedPlaylists = 0;
-      let syncedTracks = 0;
-      let firstSyncedPlaylistId: string | null = null;
-      let firstError: unknown = null;
-
-      let completedPlaylists = 0;
-      let nextPlaylistIndex = 0;
-      const updateSyncProgress = (): void => {
-        const message = t('playlistsPage.status.syncingAccountPlaylistsProgress', {
-          provider: providerLabel,
-          current: completedPlaylists,
-          total: playlistsToSync.length,
-        });
-        setAccountPlaylistSyncMessage(message);
-      };
-      const syncNextPlaylist = async (): Promise<void> => {
-        for (;;) {
-          const playlist = playlistsToSync[nextPlaylistIndex];
-          nextPlaylistIndex += 1;
-          if (!playlist) {
-            return;
-          }
-
-          try {
-            const imported = await streaming.importPlaylistFromUrl(playlist.webUrl);
-            syncedPlaylists += 1;
-            syncedTracks += imported.importedCount;
-            firstSyncedPlaylistId = firstSyncedPlaylistId ?? imported.playlistId;
-          } catch (playlistError) {
-            failedPlaylists += 1;
-            firstError = firstError ?? playlistError;
-          } finally {
-            completedPlaylists += 1;
-            updateSyncProgress();
-          }
-
-          await yieldToUi();
-        }
-      };
-      const workerCount = Math.min(3, playlistsToSync.length);
-      await Promise.all(Array.from({ length: workerCount }, () => syncNextPlaylist()));
-
+      const report = await syncNeteaseAccountPlaylists(streaming, (current, total) => {
+        setAccountPlaylistSyncMessage(t('playlistsPage.status.syncingAccountPlaylistsProgress', { provider: providerLabel, current, total }));
+      });
       await loadPlaylists();
-      if (firstSyncedPlaylistId) {
-        setSelectedPlaylistId(firstSyncedPlaylistId);
-        setPlaylistSearchInput('');
-        setPlaylistSearch('');
-        await loadItems(firstSyncedPlaylistId, 1, 'replace', '');
-      }
-
       window.dispatchEvent(new Event('library:playlists-changed'));
+      window.dispatchEvent(new Event(likedTracksChangedEvent));
+      window.dispatchEvent(new Event(likedChangedEvent));
 
-      if (syncedPlaylists === 0 && firstError) {
-        throw firstError;
-      }
-
-      const finalMessage =
-        failedPlaylists > 0
-          ? t('playlistsPage.status.syncedAccountPlaylistsPartial', { provider: providerLabel, playlists: syncedPlaylists, failed: failedPlaylists, tracks: syncedTracks })
-          : t('playlistsPage.status.syncedAccountPlaylists', { provider: providerLabel, playlists: syncedPlaylists, tracks: syncedTracks });
-      setAccountPlaylistSyncMessage(finalMessage);
+      const playlistMessage = report.failedPlaylists > 0
+        ? t('playlistsPage.status.syncedAccountPlaylistsPartial', { provider: providerLabel, playlists: report.syncedPlaylists, failed: report.failedPlaylists, tracks: report.syncedTracks })
+        : t('playlistsPage.status.syncedAccountPlaylists', { provider: providerLabel, playlists: report.syncedPlaylists, tracks: report.syncedTracks });
+      const likedMessage = report.liked ? t('likedPage.message.synced', { provider: providerLabel, imported: report.liked.importedCount, added: report.liked.addedCount }) : '';
+      setAccountPlaylistSyncMessage(report.errors.length && !report.syncedPlaylists && !report.liked
+        ? null
+        : [playlistMessage, likedMessage].filter(Boolean).join(' · '));
+      if (report.errors.length) setError(report.errors.join('\n'));
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : String(syncError));
-      setStatusMessage(null);
       setAccountPlaylistSyncMessage(null);
     } finally {
-      setSyncingAccountPlaylistProvider((current) => (current === provider ? null : current));
+      accountPlaylistSyncRunRef.current = false;
+      setSyncingAccountPlaylistProvider(null);
     }
-  }, [loadItems, loadPlaylists, syncingAccountPlaylistProvider, t]);
+  }, [loadPlaylists, t]);
 
   const requestAccountPlaylistSync = useCallback((provider: AccountPlaylistSyncProvider): void => {
     if (syncingAccountPlaylistProvider) {
@@ -2996,20 +2942,28 @@ export const PlaylistsPage = (): JSX.Element => {
   const contextMenuCanDownload = canDownloadPlaylist(contextMenuPlaylist, downloadsFeatureUnlocked);
   const selectedSourceFilterOption =
     playlistSourceFilterOptions.find((option) => option.value === playlistSourceFilter) ?? playlistSourceFilterOptions[0];
-  const selectedAccountSyncProvider =
-    playlistSourceFilter === 'netease' || playlistSourceFilter === 'qqmusic' ? playlistSourceFilter : null;
-  const canSyncSelectedAccountProvider = selectedAccountSyncProvider !== null && syncingAccountPlaylistProvider === null;
+  const wallQuery = wallSearch.trim().toLocaleLowerCase();
+  const wallPlaylists = filteredOrderedPlaylists.filter((playlist) => playlist.name.toLocaleLowerCase().includes(wallQuery));
+  const wallFavorites = orderedFavoriteListEntries.filter((entry) =>
+    (entry.type === 'provider' ? entry.label : entry.collection.name).toLocaleLowerCase().includes(wallQuery),
+  );
 
   return (
     <div className="playlists-page" data-view={detailOpen ? 'detail' : 'wall'}>
       <aside className="playlist-sidebar" aria-label={t('route.playlists.label')}>
         <div className="playlist-sidebar-header">
           <h1>{t('route.playlists.label')}</h1>
+          <label className="playlist-wall-search">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" aria-label="搜索歌单" placeholder="搜索歌单" value={wallSearch} onChange={(event) => setWallSearch(event.target.value)} />
+            {wallSearch ? <button type="button" aria-label="清除搜索" onClick={() => setWallSearch('')}><X size={14} /></button> : null}
+          </label>
           <button className="tool-button" type="button" aria-label={t('playlistsPage.action.importFile')} title={t('playlistsPage.action.importFile')} disabled={isImportingPlaylistFile} onClick={() => void handleImportPlaylistFile()}>
             {isImportingPlaylistFile ? <Loader2 className="spinning-icon" size={17} /> : <Upload size={17} />}
           </button>
-          <button className="tool-button" type="button" aria-label={t('playlistsPage.action.newLocal')} title={t('playlistsPage.action.newLocal')} onClick={handleShowNewPlaylistForm}>
+          <button className="playlist-wall-new" type="button" aria-label={t('playlistsPage.action.newLocal')} title={t('playlistsPage.action.newLocal')} onClick={handleShowNewPlaylistForm}>
             <Plus size={17} />
+            <span>{t('playlistsPage.empty.create')}</span>
           </button>
         </div>
 
@@ -3072,6 +3026,7 @@ export const PlaylistsPage = (): JSX.Element => {
               transition={panelTransition}
               variants={panelVariants}
             >
+            <div className="playlist-wall-quick-actions">
             {streamingAvailable ? <button
               className="playlist-daily-recommend"
               type="button"
@@ -3097,6 +3052,7 @@ export const PlaylistsPage = (): JSX.Element => {
                 <small>根据最近常听 / 历史高频</small>
               </span>
             </button>
+            </div>
 
             {accountPlaylistSyncMessage ? (
               <div className="playlist-sidebar-message" role="status">
@@ -3139,15 +3095,18 @@ export const PlaylistsPage = (): JSX.Element => {
               <button
                 className="playlist-source-sync-button"
                 type="button"
-                disabled={!canSyncSelectedAccountProvider}
-                onClick={() => selectedAccountSyncProvider ? requestAccountPlaylistSync(selectedAccountSyncProvider) : undefined}
+                disabled={syncingAccountPlaylistProvider !== null}
+                title={t('playlistsPage.action.syncNeteaseAccountHint')}
+                onClick={() => requestAccountPlaylistSync('netease')}
               >
                 {syncingAccountPlaylistProvider ? <Loader2 className="spinning-icon" size={14} /> : <RefreshCw size={14} />}
-                <span>{syncingAccountPlaylistProvider ? '同步中' : '同步'}</span>
+                <span>{syncingAccountPlaylistProvider ? '同步中' : t('playlistsPage.action.syncNeteaseAccount')}</span>
               </button>
             </div> : null}
 
-            {streamingAvailable ? <form
+            {streamingAvailable ? <details className="playlist-wall-import">
+              <summary><Link size={14} />{t('playlistsPage.importStreaming.title')}</summary>
+            <form
               className="streaming-section playlist-import-box"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -3171,21 +3130,20 @@ export const PlaylistsPage = (): JSX.Element => {
                 {isImportingPlaylist ? <Loader2 className="spinning-icon" size={15} /> : <Plus size={15} />}
                 <span>{isImportingPlaylist ? t('playlistsPage.importStreaming.adding') : t('playlistsPage.importStreaming.add')}</span>
               </button>
-            </form> : null}
+            </form></details> : null}
 
             <div className="playlist-list">
-              {filteredOrderedPlaylists.map((playlist) => {
+              {wallPlaylists.map((playlist) => {
                 const sourceLabel = playlistSourceProviderLabel(playlist);
 
                 return (
                   <motion.button
                     animate={{ opacity: 1, y: 0 }}
-                    className="playlist-list-item"
-                    data-active={playlist.id === selectedPlaylist?.id ? 'true' : undefined}
+                    className="playlist-wall-card"
                     data-dragging={draggedPlaylistId === playlist.id ? 'true' : undefined}
                     data-drop-target={dropTargetPlaylistId === playlist.id ? 'true' : undefined}
-                    data-reorderable={canReorderPlaylistList ? 'true' : undefined}
-                    draggable={canReorderPlaylistList}
+                    data-reorderable={canReorderPlaylistList && !wallQuery ? 'true' : undefined}
+                    draggable={canReorderPlaylistList && !wallQuery}
                     initial={{ opacity: 0, y: 6 }}
                     key={playlist.id}
                     layout
@@ -3210,12 +3168,18 @@ export const PlaylistsPage = (): JSX.Element => {
                   </motion.button>
                 );
               })}
-              {filteredOrderedPlaylists.length === 0 ? (
-                <p className="playlist-empty">
-                  {playlistSourceFilter === 'streaming'
-                    ? '还没有流媒体歌单。'
-                    : t('playlistsPage.empty.local')}
-                </p>
+              {!wallQuery ? <button className="playlist-wall-create" type="button" onClick={handleShowNewPlaylistForm}>
+                <span className="playlist-wall-create-art"><Plus size={32} strokeWidth={1.3} /></span>
+                <strong>{t('playlistsPage.empty.create')}</strong>
+              </button> : null}
+              {wallPlaylists.length === 0 ? (
+                <div className="playlist-wall-empty">
+                  <p className="playlist-empty">
+                    {wallQuery ? '没有匹配的歌单。' : playlistSourceFilter === 'streaming'
+                      ? '还没有流媒体歌单。'
+                      : t('playlistsPage.empty.local')}
+                  </p>
+                </div>
               ) : null}
             </div>
 
@@ -3233,6 +3197,8 @@ export const PlaylistsPage = (): JSX.Element => {
               transition={panelTransition}
               variants={panelVariants}
             >
+            <details className="playlist-wall-import">
+              <summary><Link size={14} />导入收藏</summary>
             <form
               className="streaming-section playlist-import-box"
               onSubmit={(event) => {
@@ -3255,18 +3221,18 @@ export const PlaylistsPage = (): JSX.Element => {
                 <span>{isImportingFavorites ? '导入中' : '导入收藏'}</span>
               </button>
             </form>
+            </details>
 
             <div className="playlist-list playlist-list--favorites">
-              {orderedFavoriteListEntries.map((entry) => {
+              {wallFavorites.map((entry) => {
                 return (
                   <motion.button
                     animate={{ opacity: 1, y: 0 }}
-                    className="playlist-list-item"
-                    data-active={entry.id === selectedFavoriteListId ? 'true' : undefined}
+                    className="playlist-wall-card"
                     data-dragging={draggedFavoriteListId === entry.id ? 'true' : undefined}
                     data-drop-target={dropTargetFavoriteListId === entry.id ? 'true' : undefined}
-                    data-reorderable={canReorderFavoriteList ? 'true' : undefined}
-                    draggable={canReorderFavoriteList}
+                    data-reorderable={canReorderFavoriteList && !wallQuery ? 'true' : undefined}
+                    draggable={canReorderFavoriteList && !wallQuery}
                     initial={{ opacity: 0, y: 6 }}
                     key={entry.id}
                     layout
@@ -3290,6 +3256,7 @@ export const PlaylistsPage = (): JSX.Element => {
                   </motion.button>
                 );
               })}
+              {wallFavorites.length === 0 ? <p className="playlist-empty">没有匹配的歌单。</p> : null}
             </div>
             </motion.div>
           )}

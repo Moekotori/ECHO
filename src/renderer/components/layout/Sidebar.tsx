@@ -193,14 +193,14 @@ export const Sidebar = ({
     };
   }, [menuState]);
 
-  const openRouteMenu = (event: ReactMouseEvent<HTMLButtonElement>, route: AppRoute, label: string): void => {
-    if (!isSidebarRouteId(route.id)) {
+  const openRouteMenu = (event: ReactMouseEvent<HTMLButtonElement>, routeId: AppRouteId, label: string): void => {
+    if (!isSidebarRouteId(routeId)) {
       return;
     }
 
     event.preventDefault();
     setMenuState({
-      routeId: route.id,
+      routeId,
       label,
       position: { x: event.clientX, y: event.clientY },
     });
@@ -310,7 +310,7 @@ export const Sidebar = ({
 
           onRouteChange(route.id);
         }}
-        onContextMenu={(event) => openRouteMenu(event, route, label)}
+        onContextMenu={(event) => openRouteMenu(event, route.id, label)}
         onDragEnd={() => setDraggingRouteId(null)}
         onDragOver={handleDragOver}
         onDragStart={(event) => handleDragStart(event, route.id)}
@@ -374,10 +374,35 @@ export const Sidebar = ({
             {index === 0 ? null : <h2 className="sidebar-group-label">{t(group.labelKey)}</h2>}
             <nav className={`nav-list${group.utility ? ' utility-nav' : ''}`} aria-label={group.utility ? t('app.navigation.utility') : t(group.labelKey)}>
               {group.routes.map((route) => renderRouteButton(route, group.utility))}
-              {group.utility && !isEditing ? (
-                <button className="nav-item" type="button" title={t('settings.nav.steam.label')} aria-label={t('settings.nav.steam.label')} onClick={openSteamSection}>
+              {group.utility && (isEditing || !hiddenRouteIdSet.has('steam-edition')) ? (
+                <button
+                  className="nav-item"
+                  type="button"
+                  data-editing={isEditing ? 'true' : undefined}
+                  data-hidden={hiddenRouteIdSet.has('steam-edition') ? 'true' : undefined}
+                  title={isEditing ? `${hiddenRouteIdSet.has('steam-edition') ? '显示' : '隐藏'}${t('settings.nav.steam.label')}` : t('settings.nav.steam.label')}
+                  aria-label={isEditing ? `${hiddenRouteIdSet.has('steam-edition') ? '显示' : '隐藏'}${t('settings.nav.steam.label')}` : t('settings.nav.steam.label')}
+                  onClick={() => {
+                    if (isEditing) {
+                      if (hiddenRouteIdSet.has('steam-edition')) {
+                        onShowRoute?.('steam-edition');
+                      } else {
+                        onHideRoute?.('steam-edition');
+                      }
+                      return;
+                    }
+                    openSteamSection();
+                  }}
+                  onContextMenu={(event) => openRouteMenu(event, 'steam-edition', t('settings.nav.steam.label'))}
+                >
                   {renderNavIcon(AudioLines, 21)}
                   <span className="nav-item-label">{t('settings.nav.steam.label')}</span>
+                  {isEditing ? (
+                    <span className="nav-visibility-indicator" aria-hidden="true">
+                      {hiddenRouteIdSet.has('steam-edition') ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {hiddenRouteIdSet.has('steam-edition') ? <span>已关闭</span> : null}
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
             </nav>

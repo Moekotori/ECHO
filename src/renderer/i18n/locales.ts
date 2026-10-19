@@ -2768,6 +2768,8 @@ export type TranslationKey =
   | 'route.playlists.label'
   | 'playlistsPage.action.importFile'
   | 'playlistsPage.action.newLocal'
+  | 'playlistsPage.action.syncNeteaseAccount'
+  | 'playlistsPage.action.syncNeteaseAccountHint'
   | 'playlistsPage.daily.subtitle'
   | 'playlistsPage.daily.title'
   | 'playlistsPage.empty.create'

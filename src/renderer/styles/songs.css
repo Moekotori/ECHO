@@ -1,4 +1,5 @@
 .songs-page {
+  --songs-cover-size: 64px;
   display: flex;
   height: 100%;
   min-height: 0;
@@ -9,6 +10,41 @@
 .songs-page > .track-list-shell {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.songs-page .track-row {
+  grid-template-columns: var(--songs-cover-size) minmax(0, 1fr) 54px max-content;
+  padding-block: 4px;
+}
+
+.songs-page .track-row[data-draggable="true"] {
+  grid-template-columns: 20px var(--songs-cover-size) minmax(0, 1fr) 54px max-content;
+}
+
+.songs-page .track-cover,
+.songs-page .track-skeleton-cover {
+  --echo-album-cover-radius: 5px;
+  width: var(--songs-cover-size);
+  height: var(--songs-cover-size);
+  border-radius: 5px;
+}
+
+html[data-album-cover-shape="square"] .songs-page .track-cover {
+  --echo-album-cover-radius: 0px;
+}
+
+@media (max-width: 820px), (orientation: portrait) and (min-width: 821px) and (max-width: 1400px) {
+  .songs-page {
+    --songs-cover-size: 56px;
+  }
+
+  .songs-page .track-row {
+    grid-template-columns: var(--songs-cover-size) minmax(0, 1fr) 44px;
+  }
+
+  .songs-page .track-row[data-draggable="true"] {
+    grid-template-columns: 20px var(--songs-cover-size) minmax(0, 1fr) 44px;
+  }
 }
 
 .songs-header {

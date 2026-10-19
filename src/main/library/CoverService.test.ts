@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkerOptions } from 'node:worker_threads';
 import sharp from 'sharp';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { releaseSoftMemoryPressure, resetSoftMemoryJanitorForTests } from '../diagnostics/SoftMemoryJanitor';
 import type { EchoDatabase } from '../database/createDatabase';
 import { CoverService } from './CoverService';
 import type { CoverServiceOptions } from './CoverService';
@@ -298,9 +299,92 @@ afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
+  resetSoftMemoryJanitorForTests();
+  vi.useRealTimers();
 });
 
 describe('CoverService', () => {
+  it('starts only one worker for a single cover and reuses it', async () => {
+    const stats = createWorkerStats();
+    const { database } = createCoverDatabase();
+    const service = createCoverService(database, makeTempRoot(), {
+      remoteCoverWorkerFactory: createSimulatedWorkerFactory(stats),
+    });
+    expect(stats.createdWorkers).toBe(0);
+    await service.ensureCover('remote://source/1', metadataWithFakeCover(1));
+    await service.ensureCover('remote://source/2', metadataWithFakeCover(2));
+    expect(stats.createdWorkers).toBe(1);
+    expect(stats.terminatedWorkers).toBe(0);
+  });
+
+  it('retires idle workers, cancels retirement on reuse, and recreates on demand', async () => {
+    vi.useFakeTimers();
+    const stats = createWorkerStats();
+    const { database } = createCoverDatabase();
+    const service = createCoverService(database, makeTempRoot(), {
+      remoteCoverIdleWorkerTimeoutMs: 100,
+      remoteCoverWorkerFactory: createSimulatedWorkerFactory(stats, { delayMs: 20 }),
+    });
+    const first = service.ensureCover('remote://source/1', metadataWithFakeCover(1));
+    await vi.advanceTimersByTimeAsync(20);
+    await first;
+    await vi.advanceTimersByTimeAsync(90);
+    const second = service.ensureCover('remote://source/2', metadataWithFakeCover(2));
+    await vi.advanceTimersByTimeAsync(20);
+    await second;
+    expect(stats.createdWorkers).toBe(1);
+    expect(stats.terminatedWorkers).toBe(0);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(stats.terminatedWorkers).toBe(1);
+    const third = service.ensureCover('remote://source/3', metadataWithFakeCover(3));
+    expect(stats.createdWorkers).toBe(2);
+    await vi.advanceTimersByTimeAsync(20);
+    await third;
+    service.close();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(stats.terminatedWorkers).toBe(2);
+  });
+
+  it('pressure cleanup preserves active and queued work, then releases idle workers', async () => {
+    vi.useFakeTimers();
+    const stats = createWorkerStats();
+    const { database, getInsertCount } = createCoverDatabase();
+    const service = createCoverService(database, makeTempRoot(), {
+      remoteCoverPoolSize: 1,
+      remoteCoverIdleWorkerTimeoutMs: 10,
+      remoteCoverWorkerFactory: createSimulatedWorkerFactory(stats, { delayMs: 50 }),
+    });
+    const pending = [1, 2].map((id) => service.ensureCover(`remote://source/${id}`, metadataWithFakeCover(id)));
+    const active = await releaseSoftMemoryPressure({ cooldownMs: 0 });
+    expect(active.removedEntries).toBe(0);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(stats.terminatedWorkers).toBe(0);
+    await vi.advanceTimersByTimeAsync(40);
+    await Promise.all(pending);
+    expect(getInsertCount()).toBe(2);
+    const idle = await releaseSoftMemoryPressure({ cooldownMs: 0 });
+    expect(idle.removedEntries).toBe(1);
+    expect(stats.terminatedWorkers).toBe(1);
+    service.close();
+    expect(await releaseSoftMemoryPressure({ cooldownMs: 0 })).toMatchObject({ skippedReason: 'empty' });
+  });
+
+  it('rejects startup failure and permits a later retry without losing queued tasks', async () => {
+    const stats = createWorkerStats();
+    const { database } = createCoverDatabase();
+    const workerFactory = createSimulatedWorkerFactory(stats);
+    let attempts = 0;
+    const service = createCoverService(database, makeTempRoot(), {
+      remoteCoverWorkerFactory: (source, options) => {
+        if (++attempts === 1) throw new Error('worker startup failed');
+        return workerFactory(source, options);
+      },
+    });
+    await expect(service.ensureCover('remote://source/1', metadataWithFakeCover(1))).rejects.toThrow('worker startup failed');
+    await expect(service.ensureCover('remote://source/2', metadataWithFakeCover(2))).resolves.toEqual(expect.any(String));
+    expect(stats.createdWorkers).toBe(1);
+  });
+
   it('generates remote cover cache variants through the worker path', async () => {
     const root = makeTempRoot();
     const { database } = createCoverDatabase();

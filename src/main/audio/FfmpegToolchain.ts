@@ -1,6 +1,6 @@
 import { existsSync as nodeExistsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { execFileSync as nodeExecFileSync } from 'node:child_process';
+import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node:child_process';
 import electron from 'electron';
 import { resolveInstalledAudioRuntimeFfmpeg } from '../app/RuntimeComponentService';
 
@@ -29,6 +29,7 @@ export type FfmpegToolchainDependencies = {
   cwd?: string;
   existsSync?: (path: string) => boolean;
   execFileSync?: typeof nodeExecFileSync;
+  execFile?: typeof nodeExecFile;
   requireHealthy?: boolean;
 };
 
@@ -43,6 +44,7 @@ type FfmpegManifest = {
 };
 
 const toolchainCache = new Map<string, FfmpegToolchainInfo>();
+const pendingInspections = new Map<string, Promise<FfmpegToolchainInfo>>();
 
 const normalizePath = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value : null;
@@ -252,6 +254,69 @@ export const resolveFfmpegToolchain = (dependencies: FfmpegToolchainDependencies
 export const resolveFfmpegToolchainPath = (dependencies: FfmpegToolchainDependencies = {}): string =>
   resolveFfmpegToolchain({ ...dependencies, requireHealthy: dependencies.requireHealthy ?? false }).path;
 
+/** Probe subprocesses without blocking Electron's main event loop. */
+export const resolveFfmpegToolchainAsync = async (
+  dependencies: FfmpegToolchainDependencies = {},
+): Promise<FfmpegToolchainInfo> => {
+  if (dependencies.requireHealthy === false) {
+    return resolveFfmpegToolchain(dependencies);
+  }
+  const existsSync = dependencies.existsSync ?? nodeExistsSync;
+  let firstUnhealthy: FfmpegToolchainInfo | null = null;
+  for (const candidate of collectCandidates(dependencies)) {
+    if (candidate.mustExist && !existsSync(candidate.path)) continue;
+    const key = `${candidate.source}:${candidate.path}`;
+    let info = toolchainCache.get(key);
+    if (!info) {
+      let pending = pendingInspections.get(key);
+      if (!pending) {
+        const run = (arg: string): Promise<string> => new Promise((resolve, reject) => {
+          (dependencies.execFile ?? nodeExecFile)(candidate.path, ['-hide_banner', arg], {
+            encoding: 'utf8', timeout: 5_000, windowsHide: true,
+          }, (error, stdout) => error ? reject(error) : resolve(String(stdout)));
+        });
+        pending = (async (): Promise<FfmpegToolchainInfo> => {
+          try {
+            const versionOutput = await run('-version');
+            const filtersOutput = await run('-filters');
+            const buildConfiguration = parseBuildConfiguration(versionOutput);
+            return {
+              path: candidate.path, source: candidate.source,
+              version: parseVersion(versionOutput), healthy: true,
+              soxrAvailable: Boolean(buildConfiguration?.includes('--enable-libsoxr')) && hasAresampleFilter(filtersOutput),
+              aresampleAvailable: hasAresampleFilter(filtersOutput), buildConfiguration,
+              manifestVersion: readManifestVersion(candidate.path), error: null,
+            };
+          } catch (error) {
+            return {
+              path: candidate.path, source: candidate.source, version: null, healthy: false,
+              soxrAvailable: false, aresampleAvailable: false, buildConfiguration: null,
+              manifestVersion: readManifestVersion(candidate.path),
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        })().then((result) => {
+          // A cleared/replaced inspection must not repopulate the cache.
+          if (pendingInspections.get(key) === pending) toolchainCache.set(key, result);
+          return result;
+        }).finally(() => {
+          if (pendingInspections.get(key) === pending) pendingInspections.delete(key);
+        });
+        pendingInspections.set(key, pending);
+      }
+      info = await pending;
+    }
+    if (info.healthy) return info;
+    firstUnhealthy ??= info;
+  }
+  return firstUnhealthy ?? {
+    path: 'ffmpeg', source: 'system', version: null, healthy: false,
+    soxrAvailable: false, aresampleAvailable: false, buildConfiguration: null,
+    manifestVersion: null, error: 'ffmpeg_missing',
+  };
+};
+
 export const clearFfmpegToolchainCache = (): void => {
   toolchainCache.clear();
+  pendingInspections.clear();
 };

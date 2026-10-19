@@ -3206,6 +3206,7 @@ export const PlayerBar = ({
 
       <div className="output-status">
         <PlayerNowPlayingMoreMenu
+          useLegacyIcons={lyricsMiniPlayer}
           track={currentTrack}
           liked={isCurrentTrackLiked}
           suppressOpen={Boolean(openPopover)}
@@ -3213,6 +3214,7 @@ export const PlayerBar = ({
           onTrackUpdated={(track) => updateTrackSnapshot(track.id, track)}
         />
         <PlayerUtilitiesPopover
+          useLegacyIcons={lyricsMiniPlayer}
           isOpen={openPopover === 'utilities'}
           onOpenChange={(isOpen) => setOpenPopover(isOpen ? 'utilities' : null)}
           onOpenQueue={showQueueButton ? handleOpenQueue : undefined}

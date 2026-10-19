@@ -1,14 +1,14 @@
-import OpenCC from 'opencc-js';
+import { getOpenCCConverter } from '../text/openccConverters';
 
 const converters = [
-  OpenCC.Converter({ from: 'cn', to: 'tw' }),
-  OpenCC.Converter({ from: 'cn', to: 'hk' }),
-  OpenCC.Converter({ from: 'cn', to: 't' }),
-  OpenCC.Converter({ from: 'tw', to: 'cn' }),
-  OpenCC.Converter({ from: 'hk', to: 'cn' }),
-  OpenCC.Converter({ from: 't', to: 'cn' }),
-  OpenCC.Converter({ from: 'tw', to: 'hk' }),
-  OpenCC.Converter({ from: 'hk', to: 'tw' }),
+  getOpenCCConverter('cn', 'tw'),
+  getOpenCCConverter('cn', 'hk'),
+  getOpenCCConverter('cn', 't'),
+  getOpenCCConverter('tw', 'cn'),
+  getOpenCCConverter('hk', 'cn'),
+  getOpenCCConverter('t', 'cn'),
+  getOpenCCConverter('tw', 'hk'),
+  getOpenCCConverter('hk', 'tw'),
 ];
 
 export const chineseSearchVariants = (term: string): string[] => {

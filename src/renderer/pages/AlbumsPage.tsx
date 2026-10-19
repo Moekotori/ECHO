@@ -410,6 +410,11 @@ export const AlbumsPage = (): JSX.Element => {
     return () => window.removeEventListener(albumDetailNavigationEvent, handleNavigateAlbumDetail);
   }, [openAlbumDetail]);
 
+  const handleEscapeFromAlbumDetail = useCallback((): void => {
+    shouldRestorePageScrollRef.current = true;
+    closeAlbumDetail(true);
+  }, [closeAlbumDetail]);
+
   const handleBackFromAlbumDetail = useCallback((): void => {
     if (selectedAlbumReturnTo === 'history') {
       window.dispatchEvent(new CustomEvent('app:navigate:route', { detail: 'history' }));
@@ -1037,7 +1042,8 @@ export const AlbumsPage = (): JSX.Element => {
 
   return (
     <>
-      {selectedAlbum ? <AlbumDetailView album={selectedAlbum} onBack={handleBackFromAlbumDetail} /> : null}
+      {selectedAlbum ? <AlbumDetailView album={selectedAlbum} onBack={handleBackFromAlbumDetail}
+        onEscapeBack={selectedAlbumReturnTo === 'home' ? handleBackFromAlbumDetail : handleEscapeFromAlbumDetail} /> : null}
       <div
         className="albums-page"
         data-detail-open={selectedAlbum ? 'true' : 'false'}

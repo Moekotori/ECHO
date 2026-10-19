@@ -28,13 +28,14 @@
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(260px, 480px) max-content minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
   gap: 10px 14px;
   align-items: center;
 }
 
 .history-toolbar-meta {
   display: flex;
+  grid-column: 1 / -1;
   width: 100%;
   min-width: 0;
   align-items: center;
@@ -58,7 +59,16 @@
 }
 
 .history-filter-groups {
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.history-source-tabs {
+  flex-shrink: 0;
+}
+
+.history-date-filters {
+  min-width: 0;
 }
 
 .history-filter-tabs,
@@ -112,6 +122,7 @@
 
 .history-summary-grid {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
@@ -121,6 +132,7 @@
 .history-metric {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
   min-width: 0;
   align-items: center;
   gap: 0;
@@ -177,7 +189,8 @@
 
 .history-recent-list {
   --history-recent-row-height: auto;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* Keep empty columns so a short history cannot stretch one cover across the page. */
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
   gap: 18px;
   max-height: none;
   overflow: visible;
@@ -505,17 +518,6 @@ html[data-theme="dark"] .history-recent-replay {
   background: var(--theme-field-bg-strong);
 }
 
-@media (max-width: 1500px) {
-  .history-toolbar {
-    grid-template-columns: minmax(260px, 1fr) max-content;
-  }
-
-  .history-toolbar-meta {
-    grid-column: 1 / -1;
-    justify-content: space-between;
-  }
-}
-
 @media (max-width: 1180px) {
   .history-workspace {
     grid-template-columns: 1fr;
@@ -556,10 +558,6 @@ html[data-theme="dark"] .history-recent-replay {
   .history-summary-grid,
   .history-header-actions {
     justify-content: flex-start;
-  }
-
-  .history-recent-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .history-memory-panel,

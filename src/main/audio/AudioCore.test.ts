@@ -912,6 +912,57 @@ class PendingProbeDecoder extends FakeDecoder {
   }
 }
 
+describe('AudioSession asynchronous toolchain readiness', () => {
+  it('waits for inspection before probing or starting audio', async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    const probeLocalFile = vi.fn(async (): Promise<AudioProbeResult> => { throw new Error('probe_reached'); });
+    const startAudioDaemon = vi.fn();
+    const session = createAudioSessionForTest({
+      decoder: { ensureToolchainReady: () => ready, probeLocalFile, decodeLocalFile: vi.fn() },
+      deviceService: { listDevices: () => [] }, startAudioDaemon,
+      disableWatchdogTimer: true, logger: noopLogger,
+    });
+    try {
+      const playing = session.playLocalFile({ filePath: 'song.flac' });
+      const rejected = expect(playing).rejects.toThrow('probe_reached');
+      await Promise.resolve();
+      expect(probeLocalFile).not.toHaveBeenCalled();
+      expect(startAudioDaemon).not.toHaveBeenCalled();
+      release();
+      await rejected;
+      expect(probeLocalFile).toHaveBeenCalledOnce();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('does not restart a stopped request when inspection completes', async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    const probeLocalFile = vi.fn();
+    const startAudioDaemon = vi.fn();
+    const session = createAudioSessionForTest({
+      decoder: { ensureToolchainReady: () => ready, probeLocalFile, decodeLocalFile: vi.fn() },
+      deviceService: { listDevices: () => [] }, startAudioDaemon,
+      disableWatchdogTimer: true, logger: noopLogger,
+    });
+    try {
+      const playing = session.playLocalFile({ filePath: 'song.flac' });
+      const cancelled = expect(playing).rejects.toThrow('audio_session_run_cancelled');
+      await Promise.resolve();
+      session.stop();
+      release();
+      await cancelled;
+      expect(probeLocalFile).not.toHaveBeenCalled();
+      expect(startAudioDaemon).not.toHaveBeenCalled();
+      expect(session.getStatus().state).toBe('stopped');
+    } finally {
+      session.dispose();
+    }
+  });
+});
+
 describe('AudioSession stability cleanup', () => {
   it('removes the EqBridge state listener when disposed', () => {
     const eqBridge = getEqBridge();

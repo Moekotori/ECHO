@@ -48,9 +48,9 @@ describe('useRemoteCoverPreloader helpers', () => {
       'track-10',
       'track-11',
     ]);
-    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'balanced')).toHaveLength(74);
-    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'aggressive')).toHaveLength(222);
-    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'lan')).toHaveLength(690);
+    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'balanced')).toHaveLength(26);
+    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'aggressive')).toHaveLength(98);
+    expect(selectRemoteCoverPreloadCandidates(tracks, ['track-10', 'track-11'], 'lan')).toHaveLength(322);
   });
 
   it('disables speculative preload and hydration work in low mode', () => {

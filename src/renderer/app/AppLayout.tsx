@@ -47,6 +47,7 @@ import { rememberLibraryScanStatus } from '../stores/libraryScanSession';
 import { clearSongsFirstPageSnapshot } from '../stores/songsFirstPageSnapshot';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
 import { setPlaybackStatusSnapshot, useSharedPlaybackStatus } from '../stores/playbackStatusStore';
+import { useLyricsMiniPlayerAutoHide } from '../hooks/useLyricsMiniPlayerAutoHide';
 import { useLibraryStartupArtworkPreloader } from '../hooks/useLibraryStartupArtworkPreloader';
 import { albumDetailNavigationEvent } from '../utils/albumNavigation';
 import { artistDetailNavigationEvent } from '../utils/artistNavigation';
@@ -296,7 +297,7 @@ const defaultAppWallpaperSettings: AppWallpaperSettings = {
 const defaultLyricsMiniPlayerSettings: LyricsMiniPlayerSettings = {
   lyricsPlayerBarDrawerEnabled: true,
   lyricsPlayerBarDrawerAutoEnableForMv: true,
-  lyricsPlayerBarDrawerAutoHideEnabled: false,
+  lyricsPlayerBarDrawerAutoHideEnabled: true,
   lyricsPlayerBarDrawerShortcutEnabled: false,
   lyricsPlayerBarDrawerShortcutAccelerator: null,
   lyricsPlayerBarDrawerCompactOnIdleEnabled: false,
@@ -387,7 +388,7 @@ const selectAppWallpaperSettings = (settings: AppSettings): AppWallpaperSettings
 const selectLyricsMiniPlayerSettings = (settings: Partial<AppSettings>): LyricsMiniPlayerSettings => ({
   lyricsPlayerBarDrawerEnabled: settings.lyricsPlayerBarDrawerEnabled !== false,
   lyricsPlayerBarDrawerAutoEnableForMv: settings.lyricsPlayerBarDrawerAutoEnableForMv !== false,
-  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled === true,
+  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled !== false,
   lyricsPlayerBarDrawerShortcutEnabled: settings.lyricsPlayerBarDrawerShortcutEnabled === true,
   lyricsPlayerBarDrawerShortcutAccelerator:
     typeof settings.lyricsPlayerBarDrawerShortcutAccelerator === 'string'
@@ -502,9 +503,6 @@ const settingsBackNavigationEvent = 'app:navigate:settings-back';
 const showChromeNoticeEvent = 'app:show-chrome-notice';
 const pendingSettingsSectionStorageKey = 'echo-next.settings.pending-section';
 const settingsSectionNavigationEvent = 'app:navigate:settings-section';
-const lyricsMiniPlayerAutoHideDistancePx = 150;
-const lyricsMiniPlayerAutoHideRevealBandPx = 164;
-const lyricsMiniPlayerAutoHideDelayMs = 280;
 const defaultChromeNoticeAutoHideMs = 5000;
 const updateNoticeAutoHideMs = 5000;
 const quickAudioNoticeAutoHideMs = 1800;
@@ -757,7 +755,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   const [lyricsMiniPlayerSettingsReady, setLyricsMiniPlayerSettingsReady] = useState(false);
   const [sidebarLayoutSettings, setSidebarLayoutSettings] = useState<SidebarLayoutSettings>(defaultSidebarLayoutSettings);
   const [lyricsMiniPlayerCoverSample, setLyricsMiniPlayerCoverSample] = useState<ReadableColorSample | null>(null);
-  const [isLyricsMiniPlayerAutoHidden, setIsLyricsMiniPlayerAutoHidden] = useState(false);
   const [isLyricsMiniPlayerShortcutHidden, setIsLyricsMiniPlayerShortcutHidden] = useState(false);
   const [activeLyricsViewMode, setActiveLyricsViewMode] = useState<LyricsViewMode>(() => readRememberedLyricsViewMode());
   const lastDesktopLyricsForwardRef = useRef<string | null>(null);
@@ -865,7 +862,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   }, [appWallpaperSettings.lowSpecModeEnabled, appWallpaperSettingsReady, preloadSettingsRoute]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lyricsMiniPlayerHostRef = useRef<HTMLDivElement | null>(null);
-  const lyricsMiniPlayerAutoHideTimerRef = useRef<number | null>(null);
   const touchOnScreenKeyboardEnabledRef = useRef(false);
   const touchKeyboardLastRequestAtRef = useRef(0);
   const lastAudioErrorRef = useRef<string | null>(null);
@@ -1054,6 +1050,9 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     shouldUseLyricsPlayerDrawer &&
     !isLyricsMiniPlayerShortcutModeActive &&
     lyricsMiniPlayerSettings.lyricsPlayerBarDrawerAutoHideEnabled === true;
+  const isLyricsMiniPlayerAutoHidden = useLyricsMiniPlayerAutoHide(
+    lyricsMiniPlayerHostRef, shouldAutoHideLyricsMiniPlayer, isLyricsQueueDrawerOpen,
+  );
   const isLyricsMiniPlayerVisuallyHidden =
     (shouldAutoHideLyricsMiniPlayer && isLyricsMiniPlayerAutoHidden && !isLyricsQueueDrawerOpen) ||
     (isLyricsMiniPlayerShortcutModeActive && isLyricsMiniPlayerShortcutHidden);
@@ -2551,101 +2550,6 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     lyricsMiniPlayerSettings.lyricsPlayerBarDrawerShortcutAccelerator,
   ]);
 
-  useEffect(() => {
-    if (!shouldAutoHideLyricsMiniPlayer) {
-      if (lyricsMiniPlayerAutoHideTimerRef.current !== null) {
-        window.clearTimeout(lyricsMiniPlayerAutoHideTimerRef.current);
-        lyricsMiniPlayerAutoHideTimerRef.current = null;
-      }
-      setIsLyricsMiniPlayerAutoHidden(false);
-      return undefined;
-    }
-
-    let animationFrame = 0;
-    let disposed = false;
-
-    const revealMiniPlayer = (): void => {
-      if (lyricsMiniPlayerAutoHideTimerRef.current !== null) {
-        window.clearTimeout(lyricsMiniPlayerAutoHideTimerRef.current);
-        lyricsMiniPlayerAutoHideTimerRef.current = null;
-      }
-      setIsLyricsMiniPlayerAutoHidden((hidden) => (hidden ? false : hidden));
-    };
-
-    const isNearMiniPlayer = (clientX: number, clientY: number): boolean => {
-      if (clientY >= window.innerHeight - lyricsMiniPlayerAutoHideRevealBandPx) {
-        return true;
-      }
-
-      const host = lyricsMiniPlayerHostRef.current;
-      const hostWidth = host?.offsetWidth ?? Math.min(820, Math.max(0, window.innerWidth - 96));
-      const hostHeight = host?.offsetHeight ?? 72;
-      const halfWidth = Math.min(window.innerWidth, hostWidth) / 2;
-      const left = window.innerWidth / 2 - halfWidth - lyricsMiniPlayerAutoHideDistancePx;
-      const right = window.innerWidth / 2 + halfWidth + lyricsMiniPlayerAutoHideDistancePx;
-      const top = window.innerHeight - hostHeight - lyricsMiniPlayerAutoHideDistancePx - 48;
-
-      return clientX >= left && clientX <= right && clientY >= top;
-    };
-
-    const scheduleHideMiniPlayer = (): void => {
-      const host = lyricsMiniPlayerHostRef.current;
-      if (isLyricsQueueDrawerOpen || (host && host.contains(document.activeElement))) {
-        revealMiniPlayer();
-        return;
-      }
-      if (lyricsMiniPlayerAutoHideTimerRef.current !== null) {
-        return;
-      }
-
-      lyricsMiniPlayerAutoHideTimerRef.current = window.setTimeout(() => {
-        lyricsMiniPlayerAutoHideTimerRef.current = null;
-        if (!disposed) {
-          setIsLyricsMiniPlayerAutoHidden(true);
-        }
-      }, lyricsMiniPlayerAutoHideDelayMs);
-    };
-
-    const handleMouseMove = (event: MouseEvent): void => {
-      const { clientX, clientY } = event;
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame);
-      }
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = 0;
-        if (isNearMiniPlayer(clientX, clientY)) {
-          revealMiniPlayer();
-        } else {
-          scheduleHideMiniPlayer();
-        }
-      });
-    };
-
-    const handleFocusIn = (event: FocusEvent): void => {
-      const host = lyricsMiniPlayerHostRef.current;
-      if (host && event.target instanceof Node && host.contains(event.target)) {
-        revealMiniPlayer();
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('focusin', handleFocusIn);
-    window.addEventListener('resize', revealMiniPlayer);
-
-    return () => {
-      disposed = true;
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame);
-      }
-      if (lyricsMiniPlayerAutoHideTimerRef.current !== null) {
-        window.clearTimeout(lyricsMiniPlayerAutoHideTimerRef.current);
-        lyricsMiniPlayerAutoHideTimerRef.current = null;
-      }
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('focusin', handleFocusIn);
-      window.removeEventListener('resize', revealMiniPlayer);
-    };
-  }, [isLyricsQueueDrawerOpen, shouldAutoHideLyricsMiniPlayer]);
 
   useEffect(() => {
     if (
@@ -3220,6 +3124,15 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       console.error('Failed to import folder from app chrome', error);
     }
   }, [notifyLibraryChanged, showChromeNotice, t]);
+
+  useEffect(() => {
+    const handleAppImportFolder = (): void => {
+      void handleImportFolder();
+    };
+
+    window.addEventListener('app:import-folder', handleAppImportFolder);
+    return () => window.removeEventListener('app:import-folder', handleAppImportFolder);
+  }, [handleImportFolder]);
 
   const handleImportFile = useCallback(async (): Promise<void> => {
     const playback = window.echo?.playback;

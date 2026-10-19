@@ -10,6 +10,7 @@ import { readTagLibAudioTechnicalMetadata, shouldPreferTagLibForAlacTechnicalFie
 import { resolveMp4ContainerAudioCodec } from './Mp4AudioCodec';
 import {
   resolveFfmpegToolchain,
+  resolveFfmpegToolchainAsync,
   resolveFfmpegToolchainPath,
   type FfmpegToolchainDependencies,
   type FfmpegToolchainInfo,
@@ -52,10 +53,12 @@ export type DecoderPipelineDependencies = {
   cwd?: string;
   existsSync?: FfmpegToolchainDependencies['existsSync'];
   execFileSync?: FfmpegToolchainDependencies['execFileSync'];
+  execFile?: FfmpegToolchainDependencies['execFile'];
   spawn?: DecoderSpawner;
   getSpawnEnv?: () => NodeJS.ProcessEnv | undefined;
   logger?: (message: string) => void;
   requireHealthyFfmpeg?: boolean;
+  inspectToolchainAsync?: boolean;
 };
 
 const normalizePositiveInteger = (value: unknown): number | null => {
@@ -310,19 +313,33 @@ const createAudioFilters = (
 };
 
 export class DecoderPipeline {
-  private readonly ffmpegPath: string;
-  private readonly toolchainInfo: FfmpegToolchainInfo;
+  private ffmpegPath: string;
+  private toolchainInfo: FfmpegToolchainInfo;
+  private readonly toolchainReady: Promise<void> | null;
+  private toolchainInspectionPending = false;
   private readonly spawn: DecoderSpawner;
   private readonly getSpawnEnv: () => NodeJS.ProcessEnv | undefined;
   private readonly logger: (message: string) => void;
   private readonly probeCache = new Map<string, ProbeCacheEntry>();
 
   constructor(dependencies: DecoderPipelineDependencies = {}) {
-    this.toolchainInfo = resolveFfmpegToolchain({
+    const toolchainDependencies = {
       ...(dependencies as FfmpegToolchainDependencies),
       requireHealthy: dependencies.requireHealthyFfmpeg ?? !dependencies.spawn,
+    };
+    this.toolchainInfo = resolveFfmpegToolchain({
+      ...toolchainDependencies,
+      requireHealthy: dependencies.inspectToolchainAsync ? false : toolchainDependencies.requireHealthy,
     });
     this.ffmpegPath = this.toolchainInfo.path;
+    this.toolchainInspectionPending = dependencies.inspectToolchainAsync === true;
+    this.toolchainReady = dependencies.inspectToolchainAsync
+      ? resolveFfmpegToolchainAsync(toolchainDependencies).then((info) => {
+          this.toolchainInfo = info;
+          this.ffmpegPath = info.path;
+          this.toolchainInspectionPending = false;
+        })
+      : null;
     this.spawn = dependencies.spawn ?? (nodeSpawn as DecoderSpawner);
     this.getSpawnEnv = dependencies.getSpawnEnv ?? (() => undefined);
     this.logger = dependencies.logger ?? defaultLogger;
@@ -335,8 +352,16 @@ export class DecoderPipeline {
     }
   }
 
-  getToolchainInfo(): FfmpegToolchainInfo {
-    return this.toolchainInfo;
+  getToolchainInfo(): FfmpegToolchainInfo | null {
+    return this.toolchainInspectionPending ? null : this.toolchainInfo;
+  }
+
+  async ensureToolchainReady(): Promise<void> {
+    await this.toolchainReady;
+  }
+
+  private assertToolchainReady(): void {
+    if (this.toolchainInspectionPending) throw new Error('ffmpeg_toolchain_not_ready');
   }
 
   async probeLocalFile(filePath: string): Promise<AudioProbeResult> {
@@ -451,6 +476,7 @@ export class DecoderPipeline {
   }
 
   decodeLocalFile(request: PcmDecodeRequest): DecoderRun {
+    this.assertToolchainReady();
     const cueTrack = resolveCueTrack(request.filePath);
     const decodePath = cueTrack?.audioPath ?? request.filePath;
     const cueRelativeStart = Math.max(0, request.startSeconds);
@@ -533,6 +559,7 @@ export class DecoderPipeline {
   }
 
   decodeAutomixPair(request: PcmAutomixDecodeRequest): DecoderRun {
+    this.assertToolchainReady();
     const tracks = [
       {
         request: request.current,
@@ -653,6 +680,7 @@ export class DecoderPipeline {
   }
 
   decodeGaplessSequence(request: PcmGaplessDecodeRequest): DecoderRun {
+    this.assertToolchainReady();
     const tracks = [
       request.current,
       request.next,

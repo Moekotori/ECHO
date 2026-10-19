@@ -589,7 +589,7 @@ export const defaultSettings: AppSettings = {
   lyricsEmptyStateHidden: true,
   lyricsPlayerBarDrawerEnabled: true,
   lyricsPlayerBarDrawerAutoEnableForMv: true,
-  lyricsPlayerBarDrawerAutoHideEnabled: false,
+  lyricsPlayerBarDrawerAutoHideEnabled: true,
   lyricsPlayerBarDrawerShortcutEnabled: false,
   lyricsPlayerBarDrawerShortcutAccelerator: null,
   lyricsPlayerBarDrawerCompactOnIdleEnabled: false,
@@ -2117,7 +2117,7 @@ export const normalizeSettings = (value: unknown, options: NormalizeSettingsOpti
     lyricsEmptyStateHidden: settings.lyricsEmptyStateHidden !== false,
     lyricsPlayerBarDrawerEnabled: settings.lyricsPlayerBarDrawerEnabled !== false,
     lyricsPlayerBarDrawerAutoEnableForMv: settings.lyricsPlayerBarDrawerAutoEnableForMv !== false,
-    lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled === true,
+    lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled !== false,
     lyricsPlayerBarDrawerShortcutEnabled: settings.lyricsPlayerBarDrawerShortcutEnabled === true,
     lyricsPlayerBarDrawerShortcutAccelerator:
       validateGlobalShortcutAccelerator(settings.lyricsPlayerBarDrawerShortcutAccelerator).accelerator,

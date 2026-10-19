@@ -136,7 +136,7 @@ const fallbackAppSettings: LyricsVisualAppSettings = {
   lyricsEmptyStateHidden: true,
   lyricsPlayerBarDrawerEnabled: true,
   lyricsPlayerBarDrawerAutoEnableForMv: true,
-  lyricsPlayerBarDrawerAutoHideEnabled: false,
+  lyricsPlayerBarDrawerAutoHideEnabled: true,
   lyricsPlayerBarDrawerCompactOnIdleEnabled: false,
   lyricsPlayerBarDrawerOpacityPercent: 78,
   lyricsPlayerBarDrawerColorMode: 'default',
@@ -297,7 +297,7 @@ const selectAppSettings = (settings: AppSettings): LyricsVisualAppSettings => ({
   lyricsEmptyStateHidden: settings.lyricsEmptyStateHidden !== false,
   lyricsPlayerBarDrawerEnabled: settings.lyricsPlayerBarDrawerEnabled !== false,
   lyricsPlayerBarDrawerAutoEnableForMv: settings.lyricsPlayerBarDrawerAutoEnableForMv !== false,
-  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled === true,
+  lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled !== false,
   lyricsPlayerBarDrawerCompactOnIdleEnabled: settings.lyricsPlayerBarDrawerCompactOnIdleEnabled === true,
   lyricsPlayerBarDrawerOpacityPercent:
     settings.lyricsPlayerBarDrawerOpacityPercent ?? fallbackAppSettings.lyricsPlayerBarDrawerOpacityPercent,

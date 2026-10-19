@@ -2488,6 +2488,11 @@ describe('AppLayout standalone routes', () => {
     });
 
     vi.useFakeTimers();
+    // Return near the bar first to cancel the initial hide scheduled with real timers.
+    act(() => {
+      fireEvent.mouseMove(window, { clientX: window.innerWidth / 2, clientY: window.innerHeight - 8 });
+      vi.advanceTimersByTime(20);
+    });
     act(() => {
       fireEvent.mouseMove(window, { clientX: 1, clientY: 1 });
       vi.advanceTimersByTime(20);
