@@ -1,6 +1,6 @@
 export const wallImageOffscreenGraceMs = 2500;
 
-type Registration = { release: () => void; deadline: number | null };
+type Registration = { release: () => void; deadline: number | null; registeredAt: number };
 type ObserverPool = {
   observer: IntersectionObserver;
   registrations: Map<HTMLElement, Registration>;
@@ -53,6 +53,8 @@ export const observeWallImageResidency = (
         for (const entry of entries) {
           const registration = registrations.get(entry.target as HTMLElement);
           if (!registration) continue;
+          // Queued entries from the previous src must not evict its replacement.
+          if (Number.isFinite(entry.time) && entry.time < registration.registeredAt) continue;
           if (entry.isIntersecting) registration.deadline = null;
           else registration.deadline ??= performance.now() + wallImageOffscreenGraceMs;
         }
@@ -62,7 +64,7 @@ export const observeWallImageResidency = (
     pool = created;
     margins.set(rootMargin, pool);
   }
-  const registration: Registration = { release, deadline: null };
+  const registration: Registration = { release, deadline: null, registeredAt: performance.now() };
   pool.registrations.set(anchor, registration);
   pool.observer.observe(anchor);
   const owner = pool;

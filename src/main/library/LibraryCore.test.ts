@@ -10,8 +10,9 @@ import { defaultSettings } from '../app/appSettings';
 import { MetadataService } from './MetadataService';
 import { createLibraryService } from './LibraryService';
 import { NetworkMetadataStore } from './network/NetworkMetadataStore';
+import { ReplayGainAnalyzer } from './audioAnalysis/ReplayGainAnalyzer';
 import type { AlbumMergeStrategy } from './AlbumService';
-import type { ArtistMergeStrategy } from '../../shared/types/appSettings';
+import type { AppSettings, ArtistMergeStrategy } from '../../shared/types/appSettings';
 import type { LibrarySort } from '../../shared/types/library';
 import type {
   CoverCacheRepairOptions,
@@ -248,7 +249,7 @@ class FakeFileScanner implements FileScanner {
 }
 
 const createHarness = (
-  overrides: { coverExtractor?: CoverExtractor; metadataReader?: MetadataReader; fileScanner?: FileScanner; writeEmbeddedTrackTags?: EmbeddedTrackTagWriter } = {},
+  overrides: { coverExtractor?: CoverExtractor; metadataReader?: MetadataReader; fileScanner?: FileScanner; writeEmbeddedTrackTags?: EmbeddedTrackTagWriter; appSettings?: () => AppSettings } = {},
 ) => {
   const root = makeTempRoot();
   const folder = join(root, 'music');
@@ -4545,6 +4546,31 @@ describe('Library Core', () => {
 
     expect(harness.service.getArtists({ pageSize: 10 }).total).toBeGreaterThan(0);
     expect(harness.service.getDiagnostics().groupingRefreshQueued).toBe(false);
+    harness.cleanup();
+  });
+
+  it('commits imports when automatic ReplayGain analysis is enabled and the manual queue is full', async () => {
+    let automaticEnabled = false;
+    let finishAnalysis!: () => void;
+    const analysisResult = { trackGainDb: -1, trackPeak: 0.8, integratedLufs: -15 };
+    const analyze = vi.spyOn(ReplayGainAnalyzer.prototype, 'analyze').mockResolvedValue(analysisResult).mockImplementationOnce(() => new Promise(resolve => {
+      finishAnalysis = () => resolve({ trackGainDb: -1, trackPeak: 0.8, integratedLufs: -15 });
+    }));
+    const harness = createHarness({
+      metadataReader: new FakeMetadataReader(metadataResult()),
+      coverExtractor: new FakeCoverExtractor(),
+      appSettings: () => ({ ...defaultSettings, replayGainAnalyzeMissingOnScan: automaticEnabled }),
+    });
+    const first = await harness.service.importAudioFile(writeAudioFile(harness.folder, 'first.flac'), { deferGroupingRefresh: true });
+    for (let index = 0; index < 8; index += 1) harness.service.startReplayGainAnalysis({ trackIds: [first.id] });
+    automaticEnabled = true;
+    const second = await harness.service.importAudioFile(writeAudioFile(harness.folder, 'second.flac'), { deferGroupingRefresh: true });
+    expect(harness.service.getTrack(second.id)).not.toBeNull();
+    expect(harness.service.getTracks({ pageSize: 10 }).total).toBe(2);
+    finishAnalysis();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(analyze).toHaveBeenCalledTimes(9);
+    expect(harness.service.getTrack(second.id)?.replayGainStatus).toBe('complete');
     harness.cleanup();
   });
 

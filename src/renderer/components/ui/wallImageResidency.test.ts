@@ -83,4 +83,26 @@ describe('wall image residency', () => {
     vi.advanceTimersByTime(500);
     expect(release).toHaveBeenCalledOnce();
   });
+
+  it('ignores an old queued departure when the same anchor now holds a new cover', () => {
+    // Keep the shared observer alive while a cover changes its src.
+    observe(document.createElement('span'), vi.fn());
+    const anchor = document.createElement('span');
+    const oldRelease = vi.fn();
+    const stopOld = observe(anchor, oldRelease);
+    const staleEntry = entry(anchor, false);
+    vi.advanceTimersByTime(10);
+    stopOld();
+    const newRelease = vi.fn();
+    observe(anchor, newRelease);
+    const observer = observers[0];
+    observer.callback([staleEntry], {} as IntersectionObserver);
+    vi.advanceTimersByTime(wallImageOffscreenGraceMs);
+    expect(newRelease).not.toHaveBeenCalled();
+    expect(oldRelease).not.toHaveBeenCalled();
+
+    observer.callback([entry(anchor, false)], {} as IntersectionObserver);
+    vi.advanceTimersByTime(wallImageOffscreenGraceMs);
+    expect(newRelease).toHaveBeenCalledOnce();
+  });
 });

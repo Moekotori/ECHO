@@ -20,7 +20,7 @@ function fixture(kind: 'bpm' | 'gain', analyze = vi.fn().mockResolvedValue(resul
   const queue = kind === 'bpm'
     ? new BpmAnalysisJobQueue(store, { analyzer: { analyze } as unknown as BpmAnalyzer })
     : new ReplayGainAnalysisJobQueue(store, { analyzer: { analyze } as unknown as ReplayGainAnalyzer });
-  return { queue, select };
+  return { queue, select, store };
 }
 
 describe.each(['bpm', 'gain'] as const)('%s analysis queue bounds', kind => {
@@ -65,5 +65,52 @@ describe.each(['bpm', 'gain'] as const)('%s analysis queue bounds', kind => {
     expect(() => queue.getStatus(ids[0]!)).toThrow('Unknown');
     expect(queue.getStatus(ids[5]!).status).toBe('completed');
     expect(queue.getStatus(ids[24]!).status).toBe('completed');
+  });
+});
+
+describe('automatic ReplayGain scheduling', () => {
+  it('coalesces imports while full and selects pending tracks once the queue drains', async () => {
+    const { queue: baseQueue, select } = fixture('gain');
+    const queue = baseQueue as ReplayGainAnalysisJobQueue;
+    for (let index = 0; index < 8; index += 1) queue.start();
+    for (let index = 0; index < 30; index += 1) queue.scheduleMissingAnalysis();
+    expect(select).toHaveBeenCalledTimes(8);
+    await flush();
+    expect(select).toHaveBeenCalledTimes(9);
+    expect(select).toHaveBeenLastCalledWith(500, undefined, false, true);
+  });
+
+  it('drains multiple bounded automatic batches', async () => {
+    const analyze = vi.fn().mockResolvedValue(result);
+    const { queue: baseQueue, select } = fixture('gain', analyze);
+    const queue = baseQueue as ReplayGainAnalysisJobQueue;
+    const track = select()[0]!;
+    select.mockReset().mockReturnValueOnce(Array.from({ length: 500 }, () => track))
+      .mockReturnValueOnce([track]);
+    queue.scheduleMissingAnalysis();
+    await flush();
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(analyze).toHaveBeenCalledTimes(501);
+  });
+
+});
+
+describe.each(['bpm', 'gain'] as const)('%s analysis shutdown', kind => {
+  it.each(['resolve', 'reject'] as const)('avoids database writes after disposal when an in-flight analysis %ss', async outcome => {
+    let settle!: () => void;
+    const analyze = vi.fn(() => new Promise((resolve, reject) => {
+      settle = () => outcome === 'resolve' ? resolve(result) : reject(new Error('stopped'));
+    }));
+    const { queue, store } = fixture(kind, analyze);
+    queue.start();
+    await flush();
+    if (queue instanceof ReplayGainAnalysisJobQueue) queue.scheduleMissingAnalysis();
+    queue.dispose();
+    settle();
+    await flush();
+    expect(store.updateTrackReplayGainAnalysis).not.toHaveBeenCalled();
+    expect(store.updateTrackBpmAnalysis).not.toHaveBeenCalled();
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(() => queue.start()).toThrow('disposed');
   });
 });

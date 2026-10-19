@@ -25,8 +25,8 @@ describe('scan worker idle lifecycle', () => {
   }
   it('keeps active and queued work alive, then releases and recreates workers', async () => {
     const { pool, workers } = setup();
-    const first = pool.searchTermsBuilder.prepare({ title: 'first' });
-    const second = pool.searchTermsBuilder.prepare({ title: 'second' });
+    const first = pool.searchTermsBuilder.prepare({ title: 'first', artist: '', album: '', albumArtist: '' });
+    const second = pool.searchTermsBuilder.prepare({ title: 'second', artist: '', album: '', albumArtist: '' });
     vi.advanceTimersByTime(200);
     expect(workers[0].terminate).not.toHaveBeenCalled();
     workers[0].complete(); await expect(first).resolves.toBe('prepared');
@@ -35,7 +35,7 @@ describe('scan worker idle lifecycle', () => {
     workers[0].complete(1); await expect(second).resolves.toBe('prepared');
     vi.advanceTimersByTime(100);
     expect(workers[0].terminate).toHaveBeenCalledOnce();
-    const third = pool.searchTermsBuilder.prepare({ title: 'third' });
+    const third = pool.searchTermsBuilder.prepare({ title: 'third', artist: '', album: '', albumArtist: '' });
     expect(workers).toHaveLength(2);
     workers[0].emit('exit', 1); workers[0].complete(1);
     expect(workers).toHaveLength(2);
@@ -43,10 +43,10 @@ describe('scan worker idle lifecycle', () => {
   });
   it('cancels scheduled retirement when another task arrives', async () => {
     const { pool, workers } = setup();
-    const first = pool.searchTermsBuilder.prepare({ title: 'first' });
+    const first = pool.searchTermsBuilder.prepare({ title: 'first', artist: '', album: '', albumArtist: '' });
     workers[0].complete(); await first;
     vi.advanceTimersByTime(90);
-    const second = pool.searchTermsBuilder.prepare({ title: 'second' });
+    const second = pool.searchTermsBuilder.prepare({ title: 'second', artist: '', album: '', albumArtist: '' });
     vi.advanceTimersByTime(100);
     expect(workers[0].terminate).not.toHaveBeenCalled();
     workers[0].complete(1); await second;
@@ -55,12 +55,12 @@ describe('scan worker idle lifecycle', () => {
   });
   it('cancels the idle timer on close and supports disabling idle retirement', async () => {
     const { pool, workers } = setup();
-    const task = pool.searchTermsBuilder.prepare({ title: 'first' });
+    const task = pool.searchTermsBuilder.prepare({ title: 'first', artist: '', album: '', albumArtist: '' });
     workers[0].complete(); await task; pool.close();
     vi.advanceTimersByTime(200);
     expect(workers[0].terminate).toHaveBeenCalledOnce();
     const disabled = setup(0);
-    const other = disabled.pool.searchTermsBuilder.prepare({ title: 'first' });
+    const other = disabled.pool.searchTermsBuilder.prepare({ title: 'first', artist: '', album: '', albumArtist: '' });
     disabled.workers[0].complete(); await other;
     vi.advanceTimersByTime(1000);
     expect(disabled.workers[0].terminate).not.toHaveBeenCalled();

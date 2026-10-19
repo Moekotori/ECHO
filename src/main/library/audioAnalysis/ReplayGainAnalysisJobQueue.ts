@@ -16,25 +16,60 @@ export class ReplayGainAnalysisJobQueue {
   private readonly analyzer: ReplayGainAnalyzer;
   private readonly jobs = new Map<string, MutableJobStatus>();
   private runningJob: Promise<void> | null = null;
+  private automaticPending = false;
+  private disposed = false;
 
   constructor(
     private readonly store: LibraryStore,
     dependencies: {
       analyzer?: ReplayGainAnalyzer;
       getTargetLufs?: () => number;
+      isAutomaticAnalysisEnabled?: () => boolean;
     } = {},
   ) {
     this.analyzer = dependencies.analyzer ?? new ReplayGainAnalyzer();
     this.getTargetLufs = dependencies.getTargetLufs ?? (() => DEFAULT_REPLAY_GAIN_TARGET_LUFS);
+    this.isAutomaticAnalysisEnabled = dependencies.isAutomaticAnalysisEnabled ?? (() => true);
   }
 
   private readonly getTargetLufs: () => number;
+  private readonly isAutomaticAnalysisEnabled: () => boolean;
 
   start(options: ReplayGainAnalysisStartOptions = {}): ReplayGainAnalysisJobStatus {
+    return this.enqueue(options);
+  }
+
+  /** Coalesce automatic requests; the database holds pending tracks, not an unbounded JS queue. */
+  scheduleMissingAnalysis(): void {
+    if (this.disposed) return;
+    this.automaticPending = true;
+    queueMicrotask(() => this.startAutomaticBatch());
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.automaticPending = false;
+  }
+
+  private startAutomaticBatch(): void {
+    if (this.disposed || !this.automaticPending || this.runningJob) return;
+    this.automaticPending = false;
+    if (!this.isAutomaticAnalysisEnabled()) return;
+    try {
+      const job = this.enqueue({ limit: 500 }, true);
+      // Failed/missing analyses transition out of 'none', avoiding endless automatic retries.
+      this.automaticPending = job.totalTracks === 500;
+    } catch (error) {
+      console.warn('[library] Automatic ReplayGain analysis could not start:', error);
+    }
+  }
+
+  private enqueue(options: ReplayGainAnalysisStartOptions, pendingOnly = false): ReplayGainAnalysisJobStatus {
+    if (this.disposed) throw new Error('ReplayGain analysis queue is disposed');
     checkAnalysisJobCapacity(this.jobs);
     const id = randomUUID();
     const limit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.limit) ? options.limit! : defaultLimit)));
-    const targets = this.store.findReplayGainAnalysisTargets(limit, options.trackIds, options.force === true);
+    const targets = this.store.findReplayGainAnalysisTargets(limit, options.trackIds, options.force === true, pendingOnly);
     const job: MutableJobStatus = {
       id,
       status: 'queued',
@@ -55,7 +90,10 @@ export class ReplayGainAnalysisJobQueue {
       .then(() => this.runJob(job, targets));
     const trackedJob = run.finally(() => {
       pruneAnalysisJobs(this.jobs);
-      if (this.runningJob === trackedJob) this.runningJob = null;
+      if (this.runningJob === trackedJob) {
+        this.runningJob = null;
+        this.startAutomaticBatch();
+      }
     });
     this.runningJob = trackedJob;
 
@@ -74,6 +112,7 @@ export class ReplayGainAnalysisJobQueue {
     job.status = 'running';
     try {
       for (const track of tracks) {
+        if (this.disposed) break;
         job.currentTrackTitle = track.title;
         this.store.markTrackReplayGainAnalyzing(track.id);
         try {
@@ -82,6 +121,7 @@ export class ReplayGainAnalysisJobQueue {
           }
 
           const result = await this.analyzer.analyze(track.path, track.duration, this.getTargetLufs());
+          if (this.disposed) break;
           this.store.updateTrackReplayGainAnalysis(track.id, {
             trackGainDb: result.trackGainDb,
             trackPeak: result.trackPeak,
@@ -90,6 +130,7 @@ export class ReplayGainAnalysisJobQueue {
           });
           job.updatedTracks += 1;
         } catch (error) {
+          if (this.disposed) break;
           const message = error instanceof Error ? error.message : String(error);
           this.store.updateTrackReplayGainAnalysis(track.id, {
             trackGainDb: null,

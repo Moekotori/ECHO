@@ -140,6 +140,7 @@ export class BpmAnalysisJobQueue {
           });
           job.updatedTracks += bpm ? 1 : 0;
         } catch (error) {
+          if (this.disposed) break;
           const message = error instanceof Error ? error.message : String(error);
           this.store.updateTrackBpmAnalysis(track.id, {
             bpm: null,

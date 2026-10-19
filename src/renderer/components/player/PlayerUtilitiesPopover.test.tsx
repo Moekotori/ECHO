@@ -33,7 +33,7 @@ describe('player utility flows', () => {
   it('retains a timer draft across tabs and close/reopen and submits the selected settings', async () => {
     const { rerender } = render(panel());
     await openSleep();
-    fireEvent.click(screen.getByRole('button', { name: '停止', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
     fireEvent.click(screen.getByRole('switch', { name: '触发前渐弱' }));
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '12' } });
     fireEvent.click(screen.getByRole('tab', { name: '快捷操作' }));
@@ -41,7 +41,7 @@ describe('player utility flows', () => {
     rerender(panel(false));
     rerender(panel());
     expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('12');
-    expect(screen.getByRole('button', { name: '停止', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: '停止' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '确定' }));
     await waitFor(() => expect(api.start).toHaveBeenCalledWith({ durationMinutes: 12, action: 'stop', fadeOut: false }));
   });
@@ -99,7 +99,7 @@ describe('player utility flows', () => {
       expect(fireEvent.keyDown(tab, { key: 'Escape' })).toBe(false);
       expect(navigateBack).not.toHaveBeenCalled();
       expect(close).toHaveBeenCalledWith(false);
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: '快捷操作', exact: true }));
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: '快捷操作' }));
     } finally {
       document.removeEventListener('keydown', navigateBack);
     }

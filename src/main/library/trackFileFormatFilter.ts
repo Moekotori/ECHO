@@ -1,12 +1,18 @@
 import type { LibraryFileFormatFilter } from '../../shared/types/library';
 type FormatColumns = { codec: string; sampleRate: string; path: string };
+/** Virtual CUE tracks retain the physical codec after the CUE/ marker. */
+export const normalizedTrackCodecSql = (column: string): string => {
+  const codec = `UPPER(TRIM(COALESCE(${column}, '')))`;
+  return `(CASE WHEN ${codec} LIKE 'CUE/%' THEN SUBSTR(${codec}, 5) ELSE ${codec} END)`;
+};
+
 const dsdAudioFormatSql = (columns: FormatColumns): string =>
-  `(UPPER(COALESCE(${columns.codec}, '')) IN ('DSF', 'DFF', 'DSD') OR COALESCE(${columns.sampleRate}, 0) >= 1000000)`;
+  `(${normalizedTrackCodecSql(columns.codec)} IN ('DSF', 'DFF', 'DSD') OR COALESCE(${columns.sampleRate}, 0) >= 1000000)`;
 
 const fileFormatSql = (columns: FormatColumns, filter: Exclude<LibraryFileFormatFilter, 'all' | 'other' | 'dsd'>): string => {
   const path = `LOWER(COALESCE(${columns.path}, ''))`;
-  const codec = `UPPER(TRIM(COALESCE(${columns.codec}, '')))`;
-  const codecRaw = `UPPER(COALESCE(${columns.codec}, ''))`;
+  const codec = normalizedTrackCodecSql(columns.codec);
+  const codecRaw = codec;
   switch (filter) {
     case 'flac':
       return `(${codec} = 'FLAC' OR ${path} LIKE '%.flac')`;

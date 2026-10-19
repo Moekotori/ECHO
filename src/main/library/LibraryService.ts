@@ -1681,14 +1681,13 @@ export class LibraryService {
           throw new Error(`Failed to import audio file: ${normalizedPath}`);
         }
 
-        if (this.readAppSettings().replayGainAnalyzeMissingOnScan === true) {
-          this.startReplayGainAnalysis({ trackIds: [track.id], force: false });
-        }
-
         this.store.seedAlbumsForTracks([track.id], this.albumService, timestamp, this.albumRefreshOptions());
 
         return track;
       });
+      if (this.readAppSettings().replayGainAnalyzeMissingOnScan === true) {
+        this.replayGainAnalysisJobQueue?.scheduleMissingAnalysis();
+      }
       if (options.deferGroupingRefresh === true) {
         this.scheduleGroupingRefresh();
       } else {
@@ -2888,6 +2887,7 @@ export class LibraryService {
     }
     (this.scanJobQueue as { dispose?: () => void }).dispose?.();
     this.bpmAnalysisJobQueue?.dispose();
+    this.replayGainAnalysisJobQueue?.dispose();
     this.closeWorkerResources();
 
     this.closeDatabase();
@@ -3838,6 +3838,7 @@ export const createLibraryService = (
   const bpmAnalysisJobQueue = new BpmAnalysisJobQueue(store);
   const replayGainAnalysisJobQueue = new ReplayGainAnalysisJobQueue(store, {
     getTargetLufs: () => readSettings().replayGainTargetLufs ?? DEFAULT_REPLAY_GAIN_TARGET_LUFS,
+    isAutomaticAnalysisEnabled: () => readSettings().replayGainAnalyzeMissingOnScan === true,
   });
   const artistImageCacheDir = resolve(dependencies.artistImageCacheDir ?? join(dirname(databasePath), 'artist-images'));
   const artistImageCacheService = new ArtistImageCacheService(database, {

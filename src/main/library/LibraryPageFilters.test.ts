@@ -43,6 +43,16 @@ const fixture = (): LibraryStore => {
 };
 
 describe('library page filter parity', () => {
+  it('keeps CUE tracks in their underlying format and lossless filters', () => {
+    const store = fixture();
+    database.exec("UPDATE tracks SET path = '/music/f1/album.cue#cueTrack=1', codec = 'CUE/FLAC' WHERE id = 't1'");
+    expect(store.getTracks({ sourceProvider: 'local', fileFormatFilter: 'flac' }).items.map(item => item.id)).toContain('t1');
+    expect(store.getTracks({ sourceProvider: 'local', fileFormatFilter: 'other' }).items.map(item => item.id)).not.toContain('t1');
+    expect(store.getFolderTracks({ folderId: 'f1', folderInsight: 'lossless' }).items.map(item => item.id)).toContain('t1');
+    database.exec("UPDATE tracks SET codec = 'CUE/DSF', sample_rate = NULL WHERE id = 't1'");
+    expect(store.getTracks({ sourceProvider: 'local', fileFormatFilter: 'dsd' }).items.map(item => item.id)).toContain('t1');
+    expect(store.getFolderTracks({ folderId: 'f1', folderInsight: 'hiRes' }).items.map(item => item.id)).toContain('t1');
+  });
   it('filters album membership before counting and paging without changing album totals', () => {
     const store = fixture();
     const query = { sourceProvider: 'local' as const, folderIds: ['f2'], pageSize: 1, sort: 'titleDesc' as const };

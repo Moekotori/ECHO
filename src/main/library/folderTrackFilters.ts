@@ -1,4 +1,5 @@
 import type { LibraryFolderInsight } from '../../shared/types/library';
+import { normalizedTrackCodecSql } from './trackFileFormatFilter';
 
 export const folderInsightFilterSql = (insight: LibraryFolderInsight | undefined, table = 'tracks'): string => {
   switch (insight) {
@@ -15,9 +16,9 @@ export const folderInsightFilterSql = (insight: LibraryFolderInsight | undefined
     case 'unplayed':
       return `COALESCE(${table}.play_count, 0) = 0`;
     case 'lossless':
-      return `UPPER(COALESCE(${table}.codec, '')) IN ('FLAC', 'ALAC', 'WAV', 'AIFF', 'APE', 'DSF', 'DFF')`;
+      return `${normalizedTrackCodecSql(`${table}.codec`)} IN ('FLAC', 'ALAC', 'WAV', 'AIFF', 'APE', 'DSF', 'DFF')`;
     case 'hiRes':
-      return `((COALESCE(${table}.bit_depth, 0) >= 24 AND COALESCE(${table}.sample_rate, 0) >= 88200) OR UPPER(COALESCE(${table}.codec, '')) IN ('DSF', 'DFF', 'DSD'))`;
+      return `((COALESCE(${table}.bit_depth, 0) >= 24 AND COALESCE(${table}.sample_rate, 0) >= 88200) OR ${normalizedTrackCodecSql(`${table}.codec`)} IN ('DSF', 'DFF', 'DSD'))`;
     case 'missingCover':
       return `NOT EXISTS (
         SELECT 1 FROM covers

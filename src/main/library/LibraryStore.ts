@@ -3287,7 +3287,7 @@ export class LibraryStore {
     return this.getTrack(trackId);
   }
 
-  findReplayGainAnalysisTargets(limit: number, trackIds?: string[], force = false): LibraryTrack[] {
+  findReplayGainAnalysisTargets(limit: number, trackIds?: string[], force = false, pendingOnly = false): LibraryTrack[] {
     const safeLimit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(limit) ? limit : 100)));
     const baseColumns = `SELECT
         tracks.id, tracks.path, tracks.title, tracks.artist, tracks.album, tracks.album_artist,
@@ -3320,6 +3320,7 @@ export class LibraryStore {
       `${baseColumns}
        WHERE tracks.missing = 0
          AND tracks.replay_gain_source != 'tag'
+         ${pendingOnly ? "AND tracks.replay_gain_status = 'none'" : ''}
          AND (
            ? = 1
            OR tracks.replay_gain_track_gain_db IS NULL
