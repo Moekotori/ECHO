@@ -3159,7 +3159,7 @@ export class LibraryStore {
   }
 
   findBpmAnalysisTargets(limit: number, trackIds?: string[], force = false): LibraryTrack[] {
-    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(limit) ? limit : 100)));
     const baseColumns = `SELECT
         tracks.id, tracks.path, tracks.title, tracks.artist, tracks.album, tracks.album_artist,
         tracks.track_no, tracks.disc_no, tracks.year, tracks.genre,
@@ -3173,13 +3173,12 @@ export class LibraryStore {
       FROM tracks`;
 
     if (trackIds?.length) {
-      const placeholders = trackIds.map(() => '?').join(', ');
       const rows = this.allRows(
         `${baseColumns}
-         WHERE tracks.missing = 0 AND tracks.id IN (${placeholders})
+         WHERE tracks.missing = 0 AND tracks.id IN (SELECT value FROM json_each(?))
          ORDER BY tracks.title COLLATE NOCASE
          LIMIT ?`,
-        ...trackIds,
+        JSON.stringify(trackIds),
         safeLimit,
       );
       return rows.map((row) => this.mapTrack(row));
@@ -3275,7 +3274,7 @@ export class LibraryStore {
   }
 
   findReplayGainAnalysisTargets(limit: number, trackIds?: string[], force = false): LibraryTrack[] {
-    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(limit) ? limit : 100)));
     const baseColumns = `SELECT
         tracks.id, tracks.path, tracks.title, tracks.artist, tracks.album, tracks.album_artist,
         tracks.track_no, tracks.disc_no, tracks.year, tracks.genre,
@@ -3289,15 +3288,14 @@ export class LibraryStore {
       FROM tracks`;
 
     if (trackIds?.length) {
-      const placeholders = trackIds.map(() => '?').join(', ');
       const rows = this.allRows(
         `${baseColumns}
          WHERE tracks.missing = 0
-           AND tracks.id IN (${placeholders})
+           AND tracks.id IN (SELECT value FROM json_each(?))
            AND (? = 1 OR tracks.replay_gain_source != 'tag')
          ORDER BY tracks.title COLLATE NOCASE
          LIMIT ?`,
-        ...trackIds,
+        JSON.stringify(trackIds),
         force ? 1 : 0,
         safeLimit,
       );

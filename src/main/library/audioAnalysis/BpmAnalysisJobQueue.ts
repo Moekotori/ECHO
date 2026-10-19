@@ -1,3 +1,4 @@
+import { checkAnalysisJobCapacity, pruneAnalysisJobs } from './AnalysisJobRetention';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import {
@@ -42,8 +43,9 @@ export class BpmAnalysisJobQueue {
     if (this.disposed) {
       throw new Error('BPM analysis queue is disposed');
     }
+    checkAnalysisJobCapacity(this.jobs);
     const id = randomUUID();
-    const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? defaultLimit)));
+    const limit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.limit) ? options.limit! : defaultLimit)));
     const targets = this.store.findBpmAnalysisTargets(limit, options.trackIds, options.force === true);
     const job: MutableJobStatus = {
       id,
@@ -64,6 +66,7 @@ export class BpmAnalysisJobQueue {
       .catch(() => undefined)
       .then(() => this.runJob(job, targets));
     const trackedJob = run.finally(() => {
+      pruneAnalysisJobs(this.jobs);
       if (this.runningJob === trackedJob) {
         this.runningJob = null;
       }

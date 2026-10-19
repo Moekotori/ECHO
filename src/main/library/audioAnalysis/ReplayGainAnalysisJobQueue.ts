@@ -1,3 +1,4 @@
+import { checkAnalysisJobCapacity, pruneAnalysisJobs } from './AnalysisJobRetention';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_REPLAY_GAIN_TARGET_LUFS } from '../../../shared/constants/replayGain';
@@ -30,8 +31,9 @@ export class ReplayGainAnalysisJobQueue {
   private readonly getTargetLufs: () => number;
 
   start(options: ReplayGainAnalysisStartOptions = {}): ReplayGainAnalysisJobStatus {
+    checkAnalysisJobCapacity(this.jobs);
     const id = randomUUID();
-    const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? defaultLimit)));
+    const limit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.limit) ? options.limit! : defaultLimit)));
     const targets = this.store.findReplayGainAnalysisTargets(limit, options.trackIds, options.force === true);
     const job: MutableJobStatus = {
       id,
@@ -47,18 +49,15 @@ export class ReplayGainAnalysisJobQueue {
     };
     this.jobs.set(id, job);
 
-    const run = async (): Promise<void> => {
-      if (this.runningJob) {
-        await this.runningJob.catch(() => undefined);
-      }
-      await this.runJob(job, targets);
-    };
-
-    this.runningJob = run().finally(() => {
-      if (this.runningJob) {
-        this.runningJob = null;
-      }
+    const previousJob = this.runningJob;
+    const run = (previousJob ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.runJob(job, targets));
+    const trackedJob = run.finally(() => {
+      pruneAnalysisJobs(this.jobs);
+      if (this.runningJob === trackedJob) this.runningJob = null;
     });
+    this.runningJob = trackedJob;
 
     return { ...job };
   }
