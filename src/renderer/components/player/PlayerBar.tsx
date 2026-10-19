@@ -36,6 +36,7 @@ import { logLyricsConsole } from '../../diagnostics/lyricsConsole';
 import { playerCoverLayoutId } from '../../ui/motion/layoutIds';
 import { miniPlayerTransition, springSoft } from '../../ui/motion/presets';
 import { PlayerProgress } from './PlayerProgress';
+import { PlayerCoverEntryMenu } from './PlayerCoverEntryMenu';
 import { AudioSignalPathControl, AudioSignalPathPopover } from './AudioSignalPathPopover';
 import { PlayerSpeedControl } from './PlayerSpeedControl';
 import { PlayerStatusChips } from './PlayerStatusChips';
@@ -814,6 +815,12 @@ export const PlayerBar = ({
   const [audioExportFormat, setAudioExportFormat] = useState<AudioExportFormat>('mp3');
   const [hiddenPlayerBarButtonIds, setHiddenPlayerBarButtonIds] = useState<PlayerBarButtonId[]>(defaultHiddenPlayerBarButtonIds);
   const [playerBarCoverOpensMv, setPlayerBarCoverOpensMv] = useState(false);
+  const [coverEntryMenuPosition, setCoverEntryMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const coverButtonRef = useRef<HTMLButtonElement>(null);
+  const closeCoverEntryMenu = useCallback(() => {
+    setCoverEntryMenuPosition(null);
+    coverButtonRef.current?.focus();
+  }, []);
   const [isInitialLayoutReady, setIsInitialLayoutReady] = useState(false);
   const [isAudioExporting, setIsAudioExporting] = useState(false);
   const [miniPlayerState, setMiniPlayerState] = useState<MiniPlayerState | null>(null);
@@ -3064,6 +3071,7 @@ export const PlayerBar = ({
       ) : null}
       <div className="player-now">
         <motion.button
+          ref={coverButtonRef}
           className="player-cover"
           data-empty={!artworkUrl}
           type="button"
@@ -3073,6 +3081,20 @@ export const PlayerBar = ({
           layoutId={playerCoverLayoutId(trackId)}
           transition={springSoft}
           onClick={playerBarCoverOpensMv ? handleOpenMv : handleOpenLyrics}
+          aria-haspopup="menu"
+          aria-expanded={coverEntryMenuPosition !== null}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setCoverEntryMenuPosition({ x: event.clientX || rect.left, y: event.clientY || rect.top });
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault();
+              const rect = event.currentTarget.getBoundingClientRect();
+              setCoverEntryMenuPosition({ x: rect.left, y: rect.top });
+            }
+          }}
         >
           {artworkUrl ? (
             <img alt="" src={artworkUrl} />
@@ -3084,6 +3106,9 @@ export const PlayerBar = ({
           )}
           <div className="cover-sheen" />
         </motion.button>
+        {coverEntryMenuPosition ? (
+          <PlayerCoverEntryMenu position={coverEntryMenuPosition} opensMv={playerBarCoverOpensMv} onClose={closeCoverEntryMenu} />
+        ) : null}
         <div className="player-track-copy">
           <PlayerMarqueeText kind="title" text={title} />
           <PlayerMarqueeText kind="subtitle" text={artist} onClick={canOpenCurrentArtist ? handleOpenCurrentArtist : undefined} />
