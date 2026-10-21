@@ -78,7 +78,26 @@ const xmlText = (xml: string, tag: string): string | null => {
 
 const xmlBlocks = (xml: string, tag: string): string[] =>
   xml.match(new RegExp(`<[^>/:]*:?${tag}\\b[^>]*>[\\s\\S]*?<\\/[^>/:]*:?${tag}>`, 'giu')) ?? [];
-
+// UPnP device trees may nest: a vendor-specific root device can contain the
+// standard MediaRenderer as one of its children. A global regex match is
+// non-overlapping, so the root <device> swallows its first nested <device>.
+// Extract every <device> element by tag depth instead (innermost first).
+const deviceBlocks = (xml: string): string[] => {
+  const tagPattern = /<(\/?)(?:[A-Za-z_][\w.-]*:)?device\b[^>]*>/giu;
+  const blocks: string[] = [];
+  const openAt: number[] = [];
+  for (let match = tagPattern.exec(xml); match; match = tagPattern.exec(xml)) {
+    if (!match[1]) {
+      openAt.push(match.index);
+    } else {
+      const start = openAt.pop();
+      if (start !== undefined) {
+        blocks.push(xml.slice(start, match.index + match[0].length));
+      }
+    }
+  }
+  return blocks;
+};
 const decodeXml = (value: string | null): string | null => {
   if (!value) {
     return null;
@@ -105,7 +124,7 @@ const absoluteUrl = (url: string | null, baseUrl: string): string | null => {
 };
 
 export const parseDeviceDescription = (xml: string, descriptionUrl: string): DlnaDevice | null => {
-  const deviceBlock = xmlBlocks(xml, 'device').find((block) => /MediaRenderer/iu.test(xmlText(block, 'deviceType') ?? ''));
+  const deviceBlock = xmlBlocks(xml).find((block) => /MediaRenderer/iu.test(xmlText(block, 'deviceType') ?? ''));
   if (!deviceBlock) {
     return null;
   }
