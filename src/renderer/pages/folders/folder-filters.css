@@ -1,0 +1,4 @@
+.folder-filter-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.folder-filter-controls .songs-filter-field { display: flex; min-width: 170px; gap: 8px; border: 0; padding: 0; }
+.folder-filter-controls .songs-filter-picker { min-width: 120px; flex: 1; }
+.folder-filter-note { color: var(--theme-muted-text); font-size: 11px; }

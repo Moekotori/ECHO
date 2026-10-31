@@ -1,0 +1,123 @@
+.songs-sort-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.songs-sort-row > .sort-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.songs-sort-direction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--theme-muted-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.songs-sort-direction:hover {
+  color: var(--theme-page-text);
+  background: var(--theme-control-bg-hover);
+}
+
+.songs-sort-direction:focus-visible {
+  outline: 2px solid var(--theme-accent-solid-bg);
+  outline-offset: 1px;
+}
+
+.sort-menu--songs {
+  width: 252px;
+}
+
+.sort-menu-options {
+  display: grid;
+  gap: 2px;
+}
+
+.sort-multi-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 1px 2px 5px;
+  padding: 7px 7px 9px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.sort-multi-toggle-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sort-multi-toggle-copy strong {
+  color: var(--theme-heading-text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.sort-multi-toggle-copy small {
+  color: var(--theme-muted-text);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sort-multi-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--theme-panel-border-strong);
+  border-radius: 999px;
+  background: var(--theme-control-bg);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.sort-multi-switch span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--theme-muted-text);
+  transition: transform 140ms ease, background 120ms ease;
+}
+
+.sort-multi-switch[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--theme-accent-text) 58%, var(--theme-panel-border));
+  background: color-mix(in srgb, var(--theme-accent-text) 20%, var(--theme-control-bg));
+}
+
+.sort-multi-switch[aria-checked="true"] span {
+  background: var(--theme-accent-text);
+  transform: translateX(14px);
+}
+
+.sort-multi-switch:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+.sort-option .sort-option-priority {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--theme-accent-text);
+  border: 1px solid color-mix(in srgb, var(--theme-accent-text) 42%, transparent);
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+}

@@ -1,0 +1,10 @@
+.tag-editor-lyrics-panel[hidden] { display: none; }
+.track-lyrics-editor { display: grid; gap: 12px; min-width: 0; margin: 16px 0; }
+.track-lyrics-editor header, .track-lyrics-editor header > div, .track-lyrics-editor strong, .track-lyrics-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.track-lyrics-editor header { justify-content: space-between; }
+.track-lyrics-editor button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--theme-panel-border); border-radius: 8px; background: var(--theme-panel-bg); color: var(--theme-page-text); font: inherit; cursor: pointer; }
+.track-lyrics-editor button:disabled { opacity: .5; cursor: default; }
+.track-lyrics-preview, .track-lyrics-editor textarea { width: 100%; box-sizing: border-box; min-height: 120px; max-height: 280px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--theme-panel-border); border-radius: 8px; background: var(--theme-panel-bg); color: var(--theme-page-text); font: 13px/1.8 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.track-lyrics-editor textarea { height: 240px; resize: vertical; }
+.track-lyrics-editor [role='status'], .track-lyrics-editor [role='alert'] { margin: 0; font-size: 13px; }
+.track-lyrics-editor [role='alert'] { color: var(--theme-danger-text, var(--theme-page-text)); }

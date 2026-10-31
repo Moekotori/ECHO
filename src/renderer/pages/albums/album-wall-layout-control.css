@@ -1,0 +1,9 @@
+.album-wall-layout-control { position: relative; flex: 0 0 auto; }
+.album-wall-layout-control > summary { list-style: none; }
+.album-wall-layout-control > summary::-webkit-details-marker { display: none; }
+.album-wall-layout-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; display: grid; gap: 12px; width: 220px; padding: 16px; border: 1px solid var(--theme-panel-border); border-radius: 12px; background: var(--theme-panel-bg); color: var(--theme-page-text); box-shadow: 0 12px 32px color-mix(in srgb, var(--theme-page-text) 12%, transparent); }
+.album-wall-layout-panel > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.album-wall-layout-panel .styled-select { min-width: 100px; }
+.album-wall[data-custom-layout='true'] { grid-template-columns: repeat(var(--album-wall-columns), minmax(0, 1fr)); }
+.album-wall[data-custom-layout='true'] .album-card { align-content: start; }
+.album-wall[data-custom-layout='true'] .album-cover { width: var(--album-wall-cover-size); height: var(--album-wall-cover-size); max-width: 100%; justify-self: center; }

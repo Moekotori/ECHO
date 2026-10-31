@@ -1,0 +1,213 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createMockIpcRenderer } from '../test-utils/electronMocks';
+import { IpcChannels } from '../shared/constants/ipcChannels';
+import type { DesktopEchoApi, RemovedDesktopNamespace } from './apiTypes';
+import { createAppApi, createDesktopLyricsApi, createMiniPlayerApi, createPetApi, createLibraryApi, createLibraryLabApi, createPlaybackApi, createRemoteSourcesApi, createLyricsApi, createMvApi, createAudioApi, createEqApi, createSleepTimerApi, createDiagnosticsApi, createAccountsApi, createPluginsApi, createSmtcApi, createAudioCdApi, createLastFmApi, createDiscordPresenceApi, createStageBridgeApi, createMqttIntegrationApi } from './ipc';
+
+// ---------------------------------------------------------------------------
+// Expected namespaces are exhaustively checked against the active desktop type.
+// ---------------------------------------------------------------------------
+const expectedNamespaces = [
+  'app',
+  'desktopLyrics',
+  'miniPlayer',
+  'pet',
+  'library',
+  'libraryLab',
+  'playback',
+  'remoteSources',
+  'lyrics',
+  'mv',
+  'audio',
+  'eq',
+  'diagnostics',
+  'accounts',
+  'plugins',
+  'sleepTimer',
+  'taskbarMiniPlayer', 'smtc', 'audioCd', 'lastfm', 'discordPresence', 'stageBridge', 'mqttIntegration',
+] as const satisfies ReadonlyArray<Exclude<keyof DesktopEchoApi, RemovedDesktopNamespace>>;
+
+const allNamespacesCovered: Exclude<keyof DesktopEchoApi, RemovedDesktopNamespace | typeof expectedNamespaces[number]> extends never ? true : never = true;
+
+// ---------------------------------------------------------------------------
+// Build the full echoApi shape the same way src/preload/index.ts does,
+// but with test mocks.
+// ---------------------------------------------------------------------------
+function buildEchoApi(): DesktopEchoApi {
+  const ipcRenderer = createMockIpcRenderer() as any;
+  const sa = {
+    systemAudioModeActive: false,
+    ownsSystemAudioPlayback: true,
+    getSystemAudioStatus: vi.fn(),
+    getSystemPlaybackStatus: vi.fn(),
+    setSystemOutputMode: vi.fn(),
+    stopSystemPlayback: vi.fn(),
+    lastNativeAudioStatus: null as any,
+    applySystemOutputSettings: vi.fn(),
+    requiresNativeChainedPlayback: vi.fn().mockReturnValue(false),
+    requiresNativeSystemLocalPlayback: vi.fn().mockReturnValue(false),
+    requiresNativeSystemMediaPlayback: vi.fn().mockReturnValue(false),
+    shouldUseSystemAudioForPlayback: vi.fn().mockResolvedValue(false),
+    playLocalFileWithSystemAudio: vi.fn(),
+    applyEqState: vi.fn(),
+    applyChannelBalanceState: vi.fn(),
+    applyRoomCorrectionState: vi.fn(),
+  };
+  const webUtils = { getPathForFile: vi.fn() };
+  const deps = {
+    localAudioFileOpenHandlers: new Set<(paths: string[]) => void>(),
+    pendingLocalAudioFileOpenEvents: [] as string[][],
+    automixAdvanceHandlers: new Set<(event: any) => void>(),
+    isMainPlaybackRenderer: true,
+    invokeMainPlaybackRenderer: vi.fn(),
+  };
+
+  return {
+    app: createAppApi(ipcRenderer, IpcChannels),
+    desktopLyrics: createDesktopLyricsApi(ipcRenderer, IpcChannels),
+    miniPlayer: createMiniPlayerApi(ipcRenderer, IpcChannels),
+    pet: createPetApi(ipcRenderer, IpcChannels),
+    library: createLibraryApi(ipcRenderer, IpcChannels, webUtils as any),
+    libraryLab: createLibraryLabApi(ipcRenderer, IpcChannels),
+    playback: createPlaybackApi(ipcRenderer, IpcChannels, sa as any, deps),
+    remoteSources: createRemoteSourcesApi(ipcRenderer, IpcChannels),
+    lyrics: createLyricsApi(ipcRenderer, IpcChannels),
+    mv: createMvApi(ipcRenderer, IpcChannels),
+    audio: createAudioApi(ipcRenderer, IpcChannels, sa as any),
+    eq: createEqApi(ipcRenderer, IpcChannels, sa as any),
+    diagnostics: createDiagnosticsApi(ipcRenderer, IpcChannels),
+    accounts: createAccountsApi(ipcRenderer, IpcChannels),
+    plugins: createPluginsApi(ipcRenderer, IpcChannels, webUtils as any),
+    sleepTimer: createSleepTimerApi(ipcRenderer, IpcChannels),
+    taskbarMiniPlayer: {
+      show: vi.fn(), hide: vi.fn(), getState: vi.fn(), setEnabled: vi.fn(), onStateChanged: vi.fn(),
+    },
+    smtc: createSmtcApi(ipcRenderer, IpcChannels),
+    audioCd: createAudioCdApi(ipcRenderer, IpcChannels),
+    lastfm: createLastFmApi(ipcRenderer, IpcChannels),
+    discordPresence: createDiscordPresenceApi(ipcRenderer, IpcChannels),
+    stageBridge: createStageBridgeApi(ipcRenderer, IpcChannels),
+    mqttIntegration: createMqttIntegrationApi(ipcRenderer, IpcChannels),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+describe('echoApi shape', () => {
+  const echoApi = buildEchoApi();
+
+  it('has exactly the expected namespaces', () => {
+    expect(allNamespacesCovered).toBe(true);
+    const actualKeys = Object.keys(echoApi).sort();
+    const expectedKeys = [...expectedNamespaces].sort();
+    expect(actualKeys).toEqual(expectedKeys);
+  });
+
+  it('each namespace is an object with methods (not null/undefined)', () => {
+    for (const key of expectedNamespaces) {
+      const ns = (echoApi as Record<string, unknown>)[key];
+      expect(ns, `namespace "${key}" should be defined`).toBeDefined();
+      expect(ns, `namespace "${key}" should not be null`).not.toBeNull();
+      expect(typeof ns, `namespace "${key}" should be an object`).toBe('object');
+
+      const methods = Object.values(ns as object).filter((v) => typeof v === 'function');
+      expect(methods.length, `namespace "${key}" should have at least one method`).toBeGreaterThan(0);
+    }
+  });
+
+  it('deduplicates desktop lyrics reveal retries by request id', () => {
+    const ipcRenderer = createMockIpcRenderer();
+    const desktopLyrics = createDesktopLyricsApi(ipcRenderer as any, IpcChannels);
+    const handler = vi.fn();
+
+    const listener = ipcRenderer.on.mock.calls.find(
+      ([channel]) => channel === IpcChannels.DesktopLyricsRevealMenu,
+    )?.[1] as ((event: unknown, requestId: unknown) => void) | undefined;
+    expect(listener).toBeTypeOf('function');
+
+    listener?.({}, 7);
+    listener?.({}, 7);
+    listener?.({}, 7);
+    expect(handler).not.toHaveBeenCalled();
+
+    desktopLyrics.onRevealMenu(handler);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    listener?.({}, 8);
+    listener?.({}, 7);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('audio has core methods: getStatus / onStatus / listDevices / setOutput', () => {
+    const audioMethods = ['getStatus', 'onStatus', 'listDevices', 'setOutput'];
+    for (const method of audioMethods) {
+      expect(
+        typeof (echoApi.audio as Record<string, unknown>)[method],
+        `audio.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('audio has extended methods: getDiagnostics / onSessionReset / exportFile / resetEngine / forceRestart', () => {
+    const extended = ['getDiagnostics', 'onSessionReset', 'exportFile', 'resetEngine', 'forceRestart'];
+    for (const method of extended) {
+      expect(
+        typeof (echoApi.audio as Record<string, unknown>)[method],
+        `audio.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('playback has core methods: play / pause / stop / seek / getStatus', () => {
+    const playbackMethods = ['play', 'pause', 'stop', 'seek', 'getStatus'];
+    for (const method of playbackMethods) {
+      expect(
+        typeof (echoApi.playback as Record<string, unknown>)[method],
+        `playback.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('playback has extended methods: playLocalFile / prepareLocalFile / playMediaItem / prepareMediaItem / openLocalAudioFile', () => {
+    const extended = ['playLocalFile', 'prepareLocalFile', 'playMediaItem', 'prepareMediaItem', 'openLocalAudioFile'];
+    for (const method of extended) {
+      expect(
+        typeof (echoApi.playback as Record<string, unknown>)[method],
+        `playback.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('library has core methods: getTrack / getAlbums / getArtists / getAlbum / getPlaylists', () => {
+    const libraryMethods = ['getTrack', 'getAlbums', 'getArtists', 'getAlbum', 'getPlaylists'];
+    for (const method of libraryMethods) {
+      expect(
+        typeof (echoApi.library as Record<string, unknown>)[method],
+        `library.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('library has extended methods: chooseFolder / addFolder / getFolders / getTracks / getSummary', () => {
+    const extended = ['chooseFolder', 'addFolder', 'getFolders', 'getTracks', 'getSummary'];
+    for (const method of extended) {
+      expect(
+        typeof (echoApi.library as Record<string, unknown>)[method],
+        `library.${method} should be a function`,
+      ).toBe('function');
+    }
+  });
+
+  it('all namespace methods are functions (typeof === "function")', () => {
+    for (const key of expectedNamespaces) {
+      const ns = echoApi[key];
+      for (const [methodName, method] of Object.entries(ns)) {
+        expect(
+          typeof method,
+          `${key}.${methodName} should be a function, got ${typeof method}`,
+        ).toBe('function');
+      }
+    }
+  });
+});

@@ -1,0 +1,37 @@
+name: 问题反馈
+description: 报告使用 ECHO 时遇到的问题
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请先搜索已有 issue，避免重复反馈。
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: 提交确认
+      options:
+        - label: 请确认您的视力没有问题且素质达标
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 遇到了什么问题？正常情况下应该是什么样？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 简单说明出问题前做了什么；不确定如何复现也可以直接描述现象。
+  - type: textarea
+    id: environment
+    attributes:
+      label: 使用环境
+      value: |
+        - ECHO 版本：
+        - 操作系统：
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截图或日志（可选）
+      description: 有助于说明问题时再附上。

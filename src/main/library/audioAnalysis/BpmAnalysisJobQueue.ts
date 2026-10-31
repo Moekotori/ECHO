@@ -1,0 +1,175 @@
+import { checkAnalysisJobCapacity, pruneAnalysisJobs } from './AnalysisJobRetention';
+import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  BPM_ANALYSIS_VERSION,
+  BPM_ANALYSIS_VERSION_FIELD,
+  BPM_CONFIDENCE_THRESHOLD,
+} from '../../../shared/constants/audioAnalysis';
+import type { LibraryStore } from '../LibraryStore';
+import type { BpmAnalysisJobStatus, BpmAnalysisStartOptions, LibraryTrack } from '../libraryTypes';
+import { BpmAnalyzer } from './BpmAnalyzer';
+
+type MutableJobStatus = BpmAnalysisJobStatus;
+
+const maxStoredErrors = 100;
+const defaultLimit = 100;
+
+const nowIso = (): string => new Date().toISOString();
+
+const hasOsuTimingBpm = (track: LibraryTrack): boolean =>
+  typeof track.bpm === 'number' &&
+  Number.isFinite(track.bpm) &&
+  track.bpm > 0 &&
+  track.fieldSources?.osu === 'osu' &&
+  track.fieldSources?.bpm !== 'audio_analysis';
+
+export class BpmAnalysisJobQueue {
+  private readonly analyzer: BpmAnalyzer;
+  private readonly jobs = new Map<string, MutableJobStatus>();
+  private runningJob: Promise<void> | null = null;
+  private disposed = false;
+
+  constructor(
+    private readonly store: LibraryStore,
+    dependencies: {
+      analyzer?: BpmAnalyzer;
+    } = {},
+  ) {
+    this.analyzer = dependencies.analyzer ?? new BpmAnalyzer();
+  }
+
+  start(options: BpmAnalysisStartOptions = {}): BpmAnalysisJobStatus {
+    if (this.disposed) {
+      throw new Error('BPM analysis queue is disposed');
+    }
+    checkAnalysisJobCapacity(this.jobs);
+    const id = randomUUID();
+    const limit = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.limit) ? options.limit! : defaultLimit)));
+    const targets = this.store.findBpmAnalysisTargets(limit, options.trackIds, options.force === true);
+    const job: MutableJobStatus = {
+      id,
+      status: 'queued',
+      totalTracks: targets.length,
+      processedTracks: 0,
+      updatedTracks: 0,
+      errorCount: 0,
+      currentTrackTitle: null,
+      startedAt: nowIso(),
+      finishedAt: null,
+      errors: [],
+    };
+    this.jobs.set(id, job);
+
+    const previousJob = this.runningJob;
+    const run = (previousJob ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.runJob(job, targets));
+    const trackedJob = run.finally(() => {
+      pruneAnalysisJobs(this.jobs);
+      if (this.runningJob === trackedJob) {
+        this.runningJob = null;
+      }
+    });
+    this.runningJob = trackedJob;
+
+    return { ...job };
+  }
+
+  getStatus(jobId: string): BpmAnalysisJobStatus {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Unknown BPM analysis job ${jobId}`);
+    }
+    return { ...job, errors: [...job.errors] };
+  }
+
+  async waitForIdle(): Promise<void> {
+    while (this.runningJob) {
+      const runningJob = this.runningJob;
+      await runningJob.catch(() => undefined);
+      if (this.runningJob === runningJob) {
+        return;
+      }
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+  }
+
+  private async runJob(job: MutableJobStatus, tracks: LibraryTrack[]): Promise<void> {
+    job.status = 'running';
+    try {
+      for (const track of tracks) {
+        if (this.disposed) {
+          break;
+        }
+        job.currentTrackTitle = track.title;
+        this.store.markTrackAnalyzing(track.id);
+        try {
+          if (!existsSync(track.path)) {
+            throw new Error('track_file_missing');
+          }
+
+          const result = await this.analyzer.analyze(track.path, track.duration);
+          if (this.disposed) {
+            break;
+          }
+          const status = result.confidence >= BPM_CONFIDENCE_THRESHOLD ? 'complete' : 'low_confidence';
+          const preserveOsuBpm = hasOsuTimingBpm(track);
+          const bpm = preserveOsuBpm ? track.bpm! : result.bpm > 0 ? result.bpm : null;
+          const beatOffsetMs = result.beatOffsetMs >= 0 && result.bpm > 0 ? result.beatOffsetMs : null;
+          const storedStatus = preserveOsuBpm ? 'complete' : status;
+          // Background analysis is library-only; source tags require an explicit save.
+          this.store.updateTrackBpmAnalysis(track.id, {
+            bpm,
+            confidence: preserveOsuBpm ? 1 : result.confidence,
+            beatOffsetMs,
+            status: storedStatus,
+            ...(preserveOsuBpm
+              ? {
+                  fieldSources: {
+                    ...track.fieldSources,
+                    bpm: 'osu',
+                    ...(beatOffsetMs !== null ? { beatOffsetMs: 'audio_analysis' } : {}),
+                    [BPM_ANALYSIS_VERSION_FIELD]: String(BPM_ANALYSIS_VERSION),
+                  },
+                }
+              : {}),
+          });
+          job.updatedTracks += bpm ? 1 : 0;
+        } catch (error) {
+          if (this.disposed) break;
+          const message = error instanceof Error ? error.message : String(error);
+          this.store.updateTrackBpmAnalysis(track.id, {
+            bpm: null,
+            confidence: 0,
+            beatOffsetMs: null,
+            status: 'error',
+            error: message,
+          });
+          this.pushError(job, `${track.path}: ${message}`);
+        } finally {
+          job.processedTracks += 1;
+        }
+      }
+
+      job.status = 'completed';
+      job.finishedAt = nowIso();
+      job.currentTrackTitle = null;
+    } catch (error) {
+      this.pushError(job, error instanceof Error ? error.message : String(error));
+      job.status = 'failed';
+      job.finishedAt = nowIso();
+    }
+  }
+
+  private pushError(job: MutableJobStatus, message: string): void {
+    job.errorCount += 1;
+    job.errors.push(message);
+    if (job.errors.length > maxStoredErrors) {
+      job.errors.shift();
+    }
+  }
+}

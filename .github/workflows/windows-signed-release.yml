@@ -1,0 +1,60 @@
+name: Windows signed release build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 signed artifacts
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CSC_LINK: ${{ secrets.ECHO_WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.ECHO_WINDOWS_CSC_KEY_PASSWORD }}
+      ECHO_WINDOWS_PUBLISHER_NAME: ${{ secrets.ECHO_WINDOWS_PUBLISHER_NAME }}
+      ECHO_PACKAGE_INTEGRITY_PRIVATE_KEY_PEM: ${{ secrets.ECHO_PACKAGE_INTEGRITY_PRIVATE_KEY_PEM }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Require release signing secrets
+        shell: pwsh
+        run: |
+          $required = @(
+            'CSC_LINK',
+            'CSC_KEY_PASSWORD',
+            'ECHO_WINDOWS_PUBLISHER_NAME',
+            'ECHO_PACKAGE_INTEGRITY_PRIVATE_KEY_PEM'
+          )
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing.Count -gt 0) {
+            throw "Missing required Windows release secret(s): $($missing -join ', ')"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and verify signed Windows release
+        run: npm run build:win:release
+
+      - name: Upload verified signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-next-windows-x64-signed-${{ github.run_number }}
+          path: |
+            dist/ECHO-NEXT-Setup-*.exe
+            dist/ECHO-NEXT-Portable-*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 14

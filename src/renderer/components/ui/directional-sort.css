@@ -1,0 +1,69 @@
+.directional-sort-select,
+.sort-direction-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.directional-sort-select {
+  min-width: 0;
+  gap: 6px;
+}
+
+.directional-sort-select > .styled-select {
+  min-width: 0;
+  flex: 1;
+}
+
+.sort-direction-buttons {
+  flex: 0 0 auto;
+}
+
+.sort-direction-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--theme-muted-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.sort-direction-buttons button[aria-pressed="true"] {
+  color: var(--theme-accent-text);
+  background: var(--theme-control-bg-active);
+}
+
+.sort-direction-buttons button:not(:disabled):hover {
+  background: var(--theme-control-bg-hover);
+}
+
+.sort-direction-buttons button:focus-visible {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
+.sort-direction-buttons button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.songs-sort-row > .playlist-action-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.smart-sort-row > .sort-direction-buttons {
+  justify-self: start;
+}
+
+@media (max-width: 760px) {
+  .smart-sort-row > .sort-direction-buttons {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}

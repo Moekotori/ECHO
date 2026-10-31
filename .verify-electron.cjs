@@ -1,0 +1,1 @@
+const {app}=require('electron'); try { const Database=require('./node_modules/better-sqlite3'); const db=new Database(':memory:'); db.exec('select 1'); db.close(); console.log('VERIFY_OK'); app.exit(0); } catch(e) { console.error(e.stack); app.exit(1); }

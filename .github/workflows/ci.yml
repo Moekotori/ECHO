@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_suite:
+        description: Run the full unit test suite, including known baseline failures
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Fast code checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      native_audio_changed: ${{ steps.changed_files.outputs.native_audio_changed }}
+    env:
+      CI: true
+      ECHO_SKIP_NATIVE_ABI: "1"
+      CHANGED_FILES_FILE: ${{ github.workspace }}/.echo-changed-files.txt
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Find changed files
+        id: changed_files
+        shell: bash
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base_sha="$EVENT_BASE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]] || ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            base_sha="$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)"
+          fi
+          git diff --name-only --diff-filter=ACMR "$base_sha" "$GITHUB_SHA" > "$CHANGED_FILES_FILE"
+          if grep -Eq '^(native/audio-(host|engine)/|src/main/audio/|src/main/ipc/(audio|playback)|scripts/(build-audio-host|test-audio-engine|smoke-audio-host)|package(-lock)?\.json|\.github/workflows/ci\.yml)' "$CHANGED_FILES_FILE"; then
+            echo "native_audio_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "native_audio_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Check text encoding
+        run: npm run check:encoding
+
+      - name: Lint changed code
+        shell: bash
+        run: |
+          mapfile -t files < <(grep -E '\.(cjs|js|jsx|mjs|ts|tsx)$' "$CHANGED_FILES_FILE" || true)
+          if (( ${#files[@]} == 0 )); then
+            echo "No changed JavaScript or TypeScript files to lint."
+            exit 0
+          fi
+          ./node_modules/.bin/eslint "${files[@]}"
+
+      - name: Run changed and companion unit tests
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
+        run: |
+          declare -A selected=()
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+
+            if [[ "$file" =~ \.(test|spec)\.(cjs|js|jsx|mjs|ts|tsx)$ ]] && [[ -f "$file" ]]; then
+              selected["$file"]=1
+            fi
+
+            if [[ "$file" =~ \.(cjs|js|jsx|mjs|ts|tsx)$ ]] && [[ -f "$file" ]]; then
+              if [[ "$file" == */* ]]; then
+                directory="${file%/*}"
+              else
+                directory="."
+              fi
+              filename="${file##*/}"
+              stem="${filename%.*}"
+              while IFS= read -r candidate; do
+                selected["$candidate"]=1
+              done < <(
+                find "$directory" -maxdepth 1 -type f \
+                  \( -name "$stem.test.*" -o -name "$stem.*.test.*" \
+                     -o -name "$stem.spec.*" -o -name "$stem.*.spec.*" \) \
+                  -print
+              )
+            fi
+          done < "$CHANGED_FILES_FILE"
+
+          tests=("${!selected[@]}")
+          if (( ${#tests[@]} == 0 )); then
+            echo "No changed or companion unit tests to run."
+            exit 0
+          fi
+
+          printf 'Selected unit test: %s\n' "${tests[@]}"
+          ./node_modules/.bin/vitest run "${tests[@]}" --reporter=github-actions
+
+      - name: Run full unit test suite
+        if: github.event_name == 'workflow_dispatch' && inputs.full_suite
+        run: npm test -- --reporter=github-actions
+
+      - name: Build application bundles
+        run: node scripts/build-renderer-main.mjs
+
+  windows-core:
+    name: Windows core behavior
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    needs: quality
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      CI: true
+      ECHO_SKIP_NATIVE_ABI: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run core playback regressions
+        run: npm run test:ci:core -- --reporter=github-actions
+
+      - name: Run stable functional regression suite
+        run: npm run test:ci:functional -- --reporter=github-actions
+
+  native-audio:
+    name: Native audio host build and headless smoke
+    if: github.event_name == 'workflow_dispatch' || needs.quality.outputs.native_audio_changed == 'true'
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: true
+      ECHO_ENABLE_ASIO: "OFF"
+      ECHO_ENABLE_CUDA_DSP: "OFF"
+      ECHO_FFMPEG_PATH: /usr/bin/ffmpeg
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install native audio build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            g++ \
+            pkg-config \
+            ffmpeg \
+            libasound2-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswresample-dev
+
+      - name: Build and run native CTest suite
+        run: npm run test:audio-engine
+
+      - name: Build native audio host
+        run: npm run build:audio-host
+
+      - name: Run headless native host smoke
+        run: npm run smoke:audio-host:headless
+
+      - name: Upload native audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-audio-evidence-${{ github.run_number }}
+          path: |
+            electron-app/build/echo-audio-host
+            out/native-audio-headless-smoke.json
+            out/native/audio-host/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 7

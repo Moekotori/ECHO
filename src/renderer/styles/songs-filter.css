@@ -1,0 +1,389 @@
+.sort-menu.songs-filter-menu {
+  display: flex;
+  flex-direction: column;
+  width: min(366px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 156px));
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.songs-filter-menu:focus {
+  outline: 0;
+}
+
+.songs-filter-menu-toolbar {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px 9px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.songs-filter-menu-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.songs-filter-menu-heading strong {
+  color: var(--theme-heading-text);
+  font-size: 14px;
+  font-weight: 820;
+  line-height: 1.2;
+}
+
+.songs-filter-menu-heading small,
+.songs-filter-active-count {
+  color: var(--theme-muted-text);
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.songs-filter-active-count {
+  color: var(--theme-accent-text);
+}
+
+.songs-filter-reset {
+  min-height: 28px;
+  padding: 4px 9px;
+  color: var(--theme-accent-text);
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.songs-filter-reset:hover:not(:disabled) {
+  background: var(--theme-control-bg-hover);
+}
+
+.songs-filter-reset:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+.songs-filter-reset:disabled {
+  color: var(--theme-muted-text);
+  cursor: default;
+  opacity: 0.58;
+}
+
+.songs-filter-panel-body {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  padding: 4px 14px 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--theme-scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+.songs-filter-field {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 4px 0;
+}
+
+.songs-filter-field + .songs-filter-field {
+  border-top: 1px solid color-mix(in srgb, var(--theme-panel-border) 55%, transparent);
+}
+
+.songs-filter-field[data-open='true'] {
+  z-index: 1;
+  color: var(--theme-heading-text);
+}
+
+.songs-filter-field-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--theme-muted-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songs-filter-picker {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.songs-filter-picker-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 9px 0 11px;
+  color: var(--theme-page-text);
+  border: 0;
+  border-radius: 2px;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.2;
+  cursor: pointer;
+  appearance: none;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.songs-filter-picker-trigger:hover:not(:disabled),
+.songs-filter-picker-trigger[aria-expanded='true'] {
+  background: var(--theme-button-bg-hover);
+}
+
+.songs-filter-picker-trigger:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-ring);
+}
+
+.songs-filter-picker-trigger:disabled {
+  cursor: default;
+  opacity: 0.64;
+}
+
+.songs-filter-picker-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--theme-muted-text);
+  transition: transform 140ms ease;
+}
+
+.songs-filter-picker-trigger[aria-expanded='true'] > svg {
+  transform: rotate(180deg);
+}
+
+.songs-filter-picker-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songs-filter-picker-popover {
+  position: fixed;
+  z-index: 1200;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  /* The ambient panel token is intentionally translucent. Back floating
+   * choices with an opaque theme primitive so controls below never show
+   * through the portal. */
+  background:
+    linear-gradient(var(--theme-modal-bg), var(--theme-modal-bg)),
+    var(--color-bg-soft);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--theme-overlay-bg) 18%, transparent);
+  animation: songs-filter-picker-open 120ms ease-out both;
+}
+
+.songs-filter-picker-popover[data-searchable='true'] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.songs-filter-picker-popover[data-placement='top'] {
+  transform-origin: bottom center;
+}
+
+.songs-filter-picker-search {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 1px solid var(--theme-field-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--theme-muted-text);
+}
+
+.songs-filter-picker-search:focus-within {
+  border-color: var(--theme-accent-border);
+  box-shadow: 0 0 0 2px var(--theme-focus-ring);
+}
+
+.songs-filter-picker-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--theme-page-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.songs-filter-picker-search input::placeholder {
+  color: var(--theme-field-placeholder);
+}
+
+.songs-filter-picker-options {
+  display: grid;
+  max-height: 204px;
+  gap: 2px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--theme-scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+.songs-filter-picker-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--theme-page-text);
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
+}
+
+.songs-filter-picker-option > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.songs-filter-picker-option:is(:hover, [data-active='true']) {
+  background: var(--theme-list-row-bg-hover);
+}
+
+.songs-filter-picker-option[aria-selected='true'] {
+  color: var(--theme-accent-text);
+  background: var(--theme-list-row-bg-active);
+  font-weight: 760;
+}
+
+.songs-filter-picker-option > svg {
+  color: currentColor;
+}
+
+.songs-filter-picker-empty,
+.songs-filter-picker-loading {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  color: var(--theme-muted-text);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.songs-filter-picker-loading {
+  gap: 4px;
+}
+
+.songs-filter-picker-loading > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--theme-muted-text);
+  animation: songs-filter-loading-dot 900ms ease-in-out infinite;
+}
+
+.songs-filter-picker-loading > span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.songs-filter-picker-loading > span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+@keyframes songs-filter-picker-open {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes songs-filter-loading-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.songs-filter-folder-empty {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--theme-muted-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+@media (max-width: 720px) {
+  .sort-menu.songs-filter-menu {
+    width: min(304px, calc(100vw - 24px));
+  }
+
+  .songs-filter-field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 7px 0;
+  }
+
+  .songs-filter-field-label {
+    padding-inline: 3px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .songs-filter-picker-popover,
+  .songs-filter-picker-loading > span {
+    animation: none;
+  }
+
+  .songs-filter-picker-trigger > svg {
+    transition: none;
+  }
+}

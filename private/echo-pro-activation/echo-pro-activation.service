@@ -1,0 +1,22 @@
+[Unit]
+Description=ECHO Pro activation package issuer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=echo-pro
+Group=echo-pro
+WorkingDirectory=/opt/echo-pro-activation
+EnvironmentFile=/etc/echo-pro-activation.env
+ExecStart=/usr/bin/node /opt/echo-pro-activation/server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/echo-pro /var/lib/echo-pro-activation
+
+[Install]
+WantedBy=multi-user.target
