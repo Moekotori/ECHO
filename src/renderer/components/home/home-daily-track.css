@@ -1,0 +1,39 @@
+.home-daily-track-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  padding-inline-end: 8px;
+  border-bottom: 1px solid var(--theme-list-row-border);
+}
+.home-daily-track-row:nth-last-child(-n + 2) { border-bottom: 0; }
+.home-daily-track-row .home-discovery-track { flex: 1; gap: 12px; border-bottom: 0; }
+.home-discovery .home-daily-track-row .home-discovery-track:not(:disabled):hover { background: transparent; }
+.home-daily-track-row .home-discovery-track-copy { flex: 1; }
+.home-daily-track-row .home-discovery-track-play { opacity: 1; color: var(--theme-subtle-text); }
+.home-daily-track-row .home-discovery-track:is(:hover, :focus-visible) .home-discovery-track-play { color: var(--theme-accent-text); }
+.home-daily-track-feedback { position: relative; flex: 0 0 auto; color: var(--theme-muted-text); }
+.home-daily-track-feedback[open] { z-index: 20; }
+.home-daily-track-feedback summary { display: grid; place-items: center; width: 32px; height: 32px; list-style: none; cursor: pointer; border-radius: 6px; }
+.home-daily-track-feedback summary::-webkit-details-marker { display: none; }
+.home-daily-track-feedback summary:is(:hover, :focus-visible) { background: var(--theme-control-bg-hover); color: var(--theme-page-text); }
+.home-daily-track-feedback summary:focus-visible { outline: 2px solid var(--theme-accent-text); outline-offset: 2px; }
+.home-daily-track-menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 38px;
+  box-sizing: border-box;
+  width: min(290px, 70vw);
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--theme-panel-bg-strong);
+  color: var(--theme-page-text);
+  border: 1px solid var(--theme-panel-border-strong);
+  box-shadow: var(--theme-shadow-panel);
+}
+.home-daily-track-menu p { margin: 6px 8px 10px; color: var(--theme-muted-text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.home-daily-track-menu button { display: block; width: 100%; padding: 9px 8px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: start; border-radius: 4px; cursor: pointer; }
+.home-daily-track-menu button:hover:not(:disabled) { background: var(--theme-control-bg-hover); }
+.home-daily-track-menu button:disabled { opacity: 0.5; cursor: default; }
+.home-discovery-feedback-status { color: var(--theme-muted-text); font-size: 12px; }
+@container home (max-width: 540px) { .home-daily-track-row:nth-last-child(2) { border-bottom: 1px solid var(--theme-list-row-border); } }

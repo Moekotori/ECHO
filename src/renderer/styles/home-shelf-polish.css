@@ -1,0 +1,38 @@
+/*
+ * Home shelf density: "recommended" keeps one row of four covers beside the
+ * other rows of four, instead of stacking a second identical grid under it.
+ * The data request is unchanged; narrow layouts keep their horizontal rail.
+ */
+@container home (min-width: 601px) {
+  html .home-page .home-recommend-rail > :nth-child(n + 5) { display: none; }
+}
+
+/*
+ * Recent activity and recommended shelves in the same language as the lower
+ * Home shelves (home-discovery-polish.css): section-sized titles, soft cover
+ * shadow instead of the print edge, and a short lift on hover. Corner shape
+ * still follows the global album cover shape preference.
+ */
+html .home-page .home-music-shelves .home-section-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+html .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card .home-artwork {
+  outline: 0;
+  box-shadow: 0 12px 26px -16px var(--home-polish-art-shadow);
+  transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.32s;
+}
+html .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card:is(:hover, :focus-visible) .home-artwork {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 40px -18px var(--home-polish-art-shadow);
+}
+html .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card:is(:hover, :focus-visible) strong {
+  text-decoration: none;
+}
+html .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card strong { font-size: 14.5px; font-weight: 650; }
+html .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card span { font-size: 12.5px; color: var(--theme-muted-text); }
+html[data-accessibility-reduce-motion='true'] .home-page :is(.home-recent-panel, .home-recommend-panel) .home-cover-card .home-artwork {
+  transform: none;
+  transition: none;
+}

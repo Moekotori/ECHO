@@ -1,0 +1,79 @@
+/*
+ * Home hero artwork, track title, and playback controls.
+ * Artwork corners follow the global album cover shape preference.
+ * The --home-polish-* tokens come from home-listening-polish.css.
+ */
+
+/* Hero artwork: rounded with a neutral soft shadow */
+html .home-page .home-now-artwork-stack .home-artwork {
+  border-radius: 16px;
+  outline: 0;
+  box-shadow: 0 24px 44px -24px var(--home-polish-art-shadow);
+}
+html .home-page .home-hero h1 {
+  color: var(--theme-heading-text);
+  font-size: clamp(24px, 4.5cqi, 56px);
+  line-height: 1.14;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+html .home-page .home-now-copy .home-now-meta { font-size: 17px; }
+html .home-page .home-now-meta-inner > .home-now-link:first-of-type {
+  color: var(--theme-heading-text);
+  font-weight: 600;
+}
+html .home-page .home-primary-action {
+  min-height: 44px;
+  padding-inline: 22px 26px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Wide layouts get the larger artwork and title; narrower ones keep their sizes.
+   The threshold covers a typical desktop window (about 1090px of Home content). */
+@container home (min-width: 961px) {
+  html .home-page .home-now-card,
+  html .home-page .home-now-card[data-signal-enabled="false"] {
+    grid-template-columns: clamp(300px, 30cqi, 360px) minmax(0, 1fr);
+    grid-template-rows: 1fr auto;
+    gap: 0 clamp(40px, 4.6cqi, 56px);
+  }
+  html .home-page .home-intro-layout { padding-bottom: 12px; }
+}
+/* The lyric context under the hero is the largest live element on the screen:
+   give it real presence instead of caption-sized text. */
+@container home (min-width: 821px) {
+  html .home-page .home-now-details { grid-template-rows: minmax(16px, auto) minmax(92px, auto); gap: 14px; }
+  html .home-page .home-now-audio-facts { font-size: 12px; }
+  html .home-page .home-now-lyric { padding-top: 16px; gap: 12px; }
+  html .home-page .home-now-lyric-lines { gap: 5px; }
+  html .home-page .home-now-lyric .home-now-lyric-line[data-role="current"] {
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+  html .home-page .home-now-lyric .home-now-lyric-line:is([data-role="previous"], [data-role="next"]) {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+}
+@container home (min-width: 821px) {
+  html .home-page .home-now-artwork-stack .home-artwork {
+    box-shadow:
+      0 24px 44px -24px var(--home-polish-art-shadow),
+      inset 0 0 0 1px color-mix(in srgb, var(--theme-heading-text) 8%, transparent);
+  }
+  html .home-page .home-now-card .home-hero-actions { gap: 10px; padding-top: 26px; }
+  html .home-page .home-now-card .home-hero-actions .home-secondary-action {
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: var(--home-polish-hover);
+    color: var(--theme-heading-text);
+    transition: background-color 0.18s;
+  }
+  html .home-page .home-now-card .home-hero-actions .home-secondary-action:not(:disabled):hover {
+    background: color-mix(in srgb, var(--theme-heading-text) 12%, transparent);
+  }
+}

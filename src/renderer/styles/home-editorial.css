@@ -1,0 +1,569 @@
+/* Home composition: open album shelves, quiet statistics, no panel frames.
+ * Keep these rules scoped to Home; shared Steam panels retain their own skin elsewhere.
+ */
+.page-surface[data-route-id="home"] {
+  background: var(--theme-page-bg);
+}
+
+/* Returning Home is a direct reveal, without page or child entry fades. */
+html .page-surface[data-route-id="home"][data-route-enter="true"] {
+  animation: none !important;
+}
+
+.home-page .home-rail-transition {
+  animation: none;
+}
+
+.home-page {
+  --home-radius-shell: 0px;
+  --home-radius-card: 0px;
+  --home-radius-control: 3px;
+  --home-shadow-shell: none;
+  --home-shadow-lift: none;
+  --home-shadow-cover: none;
+  --home-shadow-cover-hover: none;
+  --home-shell-highlight: none;
+  --home-primary-action-shadow: none;
+  --home-primary-action-shadow-hover: none;
+  width: min(1200px, 100%);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  padding: 12px 12px 28px;
+  container: home / inline-size;
+}
+
+.home-page > * { min-width: 0; }
+
+/* Remove the shells themselves, including their hover and empty variants. */
+html .home-page :is(
+  .home-hero, .home-panel, .home-now-card, .home-metric-tile,
+  .home-metric-icon, .home-profile-block, .home-profile-fact,
+  .home-artist-leaderboard, .home-artist-rank-row, .home-artist-rank-chip, .home-week-stat,
+  .home-week-heatmap, .home-favorite-album-card, .home-top-track-row,
+  .home-empty-panel, .home-profile-empty, .home-top-tracks-empty,
+  .home-artist-rank-empty, .home-favorite-album-empty,
+  .steam-listening-stats-panel, .steam-leaderboard-panel,
+  .steam-listening-stats-card, .steam-listening-stats-error,
+  .steam-listening-stats-opt-in, .steam-leaderboard-opt-in,
+  .steam-leaderboard-tabs, .steam-leaderboard-current-card,
+  .steam-leaderboard-ranking, .steam-leaderboard-emblem,
+  .steam-listening-stats-emblem
+) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  transform: none;
+}
+
+.home-page :is(.home-hero, .home-panel, .home-metric-tile) {
+  contain: layout style;
+}
+
+.home-page :is(.home-hero, .home-panel) {
+  padding: 0;
+}
+
+.home-page :is(.home-hero, .home-now-card, .home-metric-tile)::before,
+.home-page :is(.home-hero, .home-metric-tile, .home-signal-label, .home-signal-visualizer)::after,
+.home-page .home-section-header h2::before,
+.home-page .home-artist-rank-row::before,
+.home-page .home-cover-card .home-artwork::after {
+  content: none;
+}
+
+.home-page .home-hero {
+  display: block;
+  min-height: 0;
+  overflow: visible;
+}
+
+.home-page .home-hero-copy {
+  grid-area: copy;
+  min-width: 0;
+  gap: 12px;
+  padding: 0;
+  align-self: start;
+  justify-content: flex-start;
+}
+
+.home-page .home-hero h1 {
+  color: var(--theme-accent-text-strong);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+}
+
+.home-page .home-hero p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.home-page .home-hero-actions {
+  gap: 10px 24px;
+  padding-top: 8px;
+}
+
+html .home-page :is(.home-secondary-action, .home-section-header button) {
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--theme-muted-text);
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font-weight: 500;
+}
+
+html .home-page :is(.home-secondary-action, .home-section-header button):not(:disabled):hover {
+  color: var(--theme-heading-text);
+  background: var(--theme-button-bg-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+html .home-page .home-hero-actions .home-secondary-action {
+  min-height: 36px;
+  gap: 7px;
+  padding: 0;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.home-page .home-hero-actions .home-secondary-action svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  stroke-width: 1.75;
+}
+
+html .home-page .home-hero-actions .home-secondary-action:not(:disabled):hover {
+  background: transparent;
+}
+
+.home-page .home-primary-action {
+  min-height: 40px;
+  padding-inline: 20px 22px;
+  color: var(--theme-on-accent);
+  background: var(--theme-accent-solid-bg);
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--echo-font-family);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+.home-page .home-primary-action svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke-width: 0;
+}
+
+.home-page .home-primary-action:not(:disabled):hover {
+  background: color-mix(in srgb, var(--theme-accent-solid-bg) 88%, var(--theme-heading-text));
+  filter: none;
+  transform: none;
+}
+
+html .home-page .home-hero-actions :is(.home-primary-action, .home-secondary-action):not(:disabled):active {
+  opacity: 0.72;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .home-page .home-hero-actions :is(.home-primary-action, .home-secondary-action) {
+    transition: none;
+  }
+}
+
+.home-page button:focus-visible {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: 4px;
+}
+
+.home-page .home-now-card,
+.home-page .home-now-card[data-signal-enabled="false"] {
+  grid-template-areas: "art copy" "art signal";
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  min-height: 0;
+  padding: 0;
+  gap: 0 26px;
+  align-content: center;
+  overflow: visible;
+}
+
+.home-page .home-now-artwork-stack {
+  width: 100%;
+  align-self: center;
+  justify-self: start;
+}
+
+.home-page .home-now-artwork-stack .home-artwork {
+  width: 100%;
+  height: auto;
+  flex-basis: auto;
+  aspect-ratio: 1;
+}
+
+.home-page .home-now-copy {
+  align-self: center;
+  gap: 6px;
+}
+
+.home-page .home-now-copy .home-now-meta { font-size: 14px; font-weight: 500; }
+.home-page .home-now-link { font-weight: 500; }
+.home-page .home-now-meta-inner { gap: 6px; }
+.home-page .home-now-details { padding-top: 4px; gap: 8px; }
+.home-page .home-now-audio-facts { font-size: 10px; font-weight: 400; letter-spacing: 0.025em; }
+.home-page .home-hero .home-continue-source { font-size: 11px; color: var(--theme-muted-text); }
+.home-page .home-pulse { align-self: center; }
+.home-page .home-pulse-heading {
+  margin: 0 0 16px;
+  color: var(--theme-muted-text);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.home-page .home-now-lyric {
+  border: 0;
+}
+
+html .home-page .home-artwork,
+html .home-page .home-cover-card:is(:hover, :focus-visible) .home-artwork {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.home-page .home-artwork[data-empty="true"] {
+  background: var(--theme-panel-bg-muted);
+}
+
+/* A restrained print edge gives square artwork definition on both themes. */
+html .home-page .home-artwork {
+  outline: 1px solid color-mix(in srgb, var(--theme-heading-text) 8%, transparent);
+  outline-offset: -1px;
+}
+
+.home-page .home-cover-card:is(:hover, :focus-visible) .home-artwork img {
+  transform: none;
+  filter: brightness(1.06);
+}
+
+.home-page :is(.home-cover-card, .home-rediscovery-album):is(:hover, :focus-visible) strong {
+  text-decoration: underline;
+  text-decoration-color: var(--theme-muted-text);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+
+.home-page .home-artwork img {
+  contain: paint;
+}
+
+.home-page .home-metric-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+}
+
+.home-page .home-metric-tile {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  overflow: visible;
+}
+
+.home-page .home-metric-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--theme-muted-text);
+}
+
+.home-page .home-metric-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.home-page .home-metric-tile div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.home-page .home-metric-tile strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.home-page .home-metric-label {
+  margin: 0;
+  font-weight: 500;
+}
+
+.home-page .home-metric-tile small {
+  display: none;
+}
+
+.home-page .home-metric-tile:hover strong {
+  color: var(--theme-accent-text-strong);
+}
+
+.home-page .home-panel {
+  gap: 16px;
+  align-content: start;
+}
+
+.home-page .home-section-header h2 {
+  padding: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.home-page .home-section-header,
+.home-page .home-recent-title-row {
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.home-page .home-recent-tabs button[data-active="true"] {
+  color: var(--theme-heading-text);
+  font-weight: 700;
+}
+
+.home-page .home-cover-rail {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  padding: 0;
+}
+
+.home-page .home-cover-card strong {
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.home-page .home-cover-card span {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.home-page .home-rediscovery-album .home-artwork {
+  max-width: none;
+}
+
+.home-page :is(
+  .home-empty-panel,
+  .home-favorite-album-empty,
+  .home-artist-rank-empty,
+  .home-top-tracks-empty,
+  .home-profile-empty
+) strong {
+  font-weight: 500;
+}
+
+.home-page :is(
+  .home-favorite-album-empty,
+  .home-artist-rank-empty,
+  .home-top-tracks-empty,
+  .home-profile-empty
+) small {
+  font-weight: 400;
+}
+
+.home-page :is(.home-stats-grid, .home-insights-grid) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 40px;
+}
+
+.home-page .home-activity-grid {
+  min-width: 0;
+}
+
+.home-page .home-week-panel {
+  grid-template-areas: "header" "summary" "heatmap";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 20px;
+}
+
+.home-page .home-week-panel .home-section-header { grid-area: header; }
+.home-page .home-week-summary { grid-area: summary; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.home-page .home-week-heatmap { --home-week-cell: 14px; grid-area: heatmap; justify-self: start; width: 100%; padding: 0; overflow-x: auto; }
+.home-page .home-week-stat { padding: 0; }
+.home-page :is(.home-week-cell, .home-week-legend i) { border-radius: 1px; box-shadow: none; }
+.home-week-months span[data-short-span="true"] { justify-self: end; overflow: visible; }
+
+.home-page :is(.home-recommend-panel, .home-insights-grid) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.home-page .home-steam-panels:empty { display: none; }
+.home-page .home-steam-panels > section { padding-inline: 0; }
+/* Open the Steam block like the discovery block below it: one hairline, then air. */
+.home-page .home-steam-panels:not(:empty) { padding-top: 28px; border-top: 1px solid var(--theme-list-row-border); }
+.home-page .home-status-line { text-align: center; }
+
+/* The music column and the quieter listening column share one vertical rhythm. */
+.home-intro-layout,
+.home-discovery-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 232px;
+  align-items: start;
+  gap: 32px;
+}
+
+.home-page :is(.home-cover-rail, .home-recommend-rail, .home-rediscovery-grid) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-list-row-border) transparent;
+}
+
+.home-intro-layout > * { min-width: 0; }
+.home-intro-layout {
+  margin: 0;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--theme-list-row-border);
+}
+.home-intro-layout .home-metric-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.home-intro-layout .home-metric-tile div { display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 12px; }
+.home-intro-layout .home-metric-tile strong { order: 1; font-size: 18px; font-weight: 500; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
+.home-intro-layout .home-metric-label { font-size: 12px; }
+.home-intro-layout .home-metric-icon { display: none; }
+
+.home-music-shelves,
+.home-listening-sidebar {
+  display: grid;
+  min-width: 0;
+  gap: 24px;
+}
+
+.home-page .home-listening-sidebar .home-stats-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+.home-page .home-listening-sidebar .home-section-header { gap: 8px; }
+.home-page .home-listening-sidebar .home-section-header h2 { font-size: 16px; letter-spacing: 0; }
+.home-page .home-listening-sidebar .home-panel { gap: 16px; }
+.home-page .home-listening-sidebar .home-section-header { padding-bottom: 10px; border-bottom: 1px solid var(--theme-list-row-border); }
+.home-page .home-listening-sidebar .home-artist-rank-panel .home-section-header {
+  border-bottom: 0;
+}
+.home-page .home-artist-rank-item + .home-artist-rank-item {
+  border-top: 0;
+}
+.home-page .home-listening-sidebar :is(.home-week-stat strong, .home-artist-rank-main strong) { font-weight: 500; }
+.home-page .home-listening-sidebar :is(.home-artist-rank-meta, .home-artist-rank-chip, .home-week-stat span) { font-weight: 400; }
+.home-page .home-listening-sidebar .home-artist-rank-meter { height: 2px; border-radius: 0; }
+.home-page .home-listening-sidebar .home-artist-rank-meter i { background: var(--theme-muted-text); box-shadow: none; }
+.home-page .home-listening-sidebar .home-artist-rank-number { color: var(--theme-muted-text); font-size: 12px; font-weight: 500; }
+.home-page .home-listening-sidebar .home-week-stat { min-height: 44px; }
+.home-page .home-listening-sidebar .home-artist-rank-row { grid-template-columns: 24px minmax(0, 1fr) auto; min-height: 48px; padding: 5px 0; gap: 2px 8px; }
+.home-page .home-listening-sidebar .home-artist-rank-main { gap: 2px; }
+.home-page .home-listening-sidebar .home-artist-rank-chip { padding: 0; font-size: 10px; }
+.home-page .home-listening-sidebar .home-artist-rank-empty { min-height: 80px; padding: 12px 0; }
+
+/* Give the track list a full-width shelf with at most two readable columns. */
+.home-page .home-top-tracks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
+}
+.home-page .home-top-track-row {
+  grid-template-columns: 22px 56px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  min-height: 88px;
+  padding: 10px 0;
+  gap: 5px 10px;
+}
+.home-page :is(.home-top-track-art, .home-top-track-art .home-artwork) { width: 56px; height: 56px; }
+.home-page .home-top-track-copy strong { font-size: 15px; font-weight: 500; }
+.home-page .home-top-track-copy small { font-size: 12px; font-weight: 400; }
+.home-page .home-top-track-meta { gap: 3px 8px; }
+.home-page .home-top-track-meta :is(strong, small) { display: inline; font-size: 11px; font-weight: 400; }
+.home-page .home-top-tracks-empty { min-height: 80px; padding: 12px 0; }
+.home-page .home-rediscovery-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.home-page .home-rediscovery-album strong { font-size: 15px; font-weight: 500; }
+
+/* Windowed desktops keep the listening column; only genuinely narrow content
+   stacks it. Name the container so nested heatmaps cannot trigger page rules. */
+@container home (max-width: 1100px) {
+  .home-intro-layout { grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; padding-block: 0 20px; }
+  .home-discovery-layout { grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; }
+  .home-intro-layout .home-metric-grid { gap: 6px; }
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 248px minmax(0, 1fr); gap: 0 24px; }
+  .home-page .home-hero-copy { gap: 6px; }
+  .home-page .home-hero-actions { gap: 8px 20px; padding-top: 4px; }
+  .home-page .home-week-heatmap { --home-week-cell: 13px; }
+  .home-page .home-cover-rail,
+  .home-page .home-rediscovery-grid { gap: 16px; }
+}
+
+@container home (max-width: 820px) {
+  .home-intro-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .home-intro-layout .home-metric-grid { display: flex; gap: 12px 24px; }
+  .home-intro-layout .home-metric-tile div { gap: 6px; }
+  .home-intro-layout .home-metric-tile strong { order: 0; font-size: 16px; }
+  .home-page .home-pulse { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+  .home-page .home-pulse-heading { margin: 0; }
+  .home-discovery-layout { grid-template-columns: minmax(0, 1fr); }
+  .home-listening-sidebar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 192px minmax(0, 1fr); gap: 0 20px; }
+}
+
+@container home (max-width: 600px) {
+  .home-page .home-top-tracks { grid-template-columns: minmax(0, 1fr); }
+  .home-intro-layout { margin-inline: 0; padding: 0 0 20px; }
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 144px minmax(0, 1fr); gap: 0 20px; }
+  .home-page .home-now-artwork-stack { align-self: start; }
+  .home-page .home-hero-actions { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 18px; justify-content: start; }
+  .home-page .home-hero-actions button { justify-content: flex-start; font-size: 12px; padding-inline: 0; }
+  .home-page .home-hero-actions .home-primary-action { padding-inline: 8px; }
+  .home-page :is(.home-cover-rail, .home-rediscovery-grid) {
+    display: grid;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: max(136px, calc((100% - 32px) / 3));
+    gap: 16px;
+    overflow-x: auto;
+    padding: 4px 4px 12px;
+    margin: -4px -4px -12px;
+    scroll-snap-type: x proximity;
+  }
+  .home-page :is(.home-cover-rail, .home-rediscovery-grid) > * { scroll-snap-align: start; }
+  .home-listening-sidebar,
+  .home-page .home-insights-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container home (max-width: 400px) {
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-areas: "art" "copy" "signal"; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .home-page .home-now-artwork-stack { width: min(240px, 100%); }
+}
+
+@media (max-width: 720px) {
+  .home-page { padding: 4px 0 24px; gap: 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page .home-rail-transition,
+  .home-page .home-skeleton-block::after { animation: none; }
+}

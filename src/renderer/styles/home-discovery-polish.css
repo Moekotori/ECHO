@@ -1,0 +1,127 @@
+/*
+ * Home lower shelves: rediscovery, daily picks, shortcuts, unplayed albums,
+ * featured album and year shelf. Markup and copy are unchanged; this re-skins
+ * the open layout with rounded artwork, large rank numerals and quiet hover
+ * feedback. The --home-polish-* tokens are defined in home-listening-polish.css.
+ */
+
+html .home-page .home-discovery {
+  gap: 56px;
+  padding-top: 36px;
+}
+html .home-page :is(.home-rediscovery, .home-discovery) .home-section-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+/* ---- Rediscovery and album shelves: rounded covers that lift on hover ---- */
+html .home-page :is(.home-rediscovery-album, .home-discovery-album-grid .home-cover-card) .home-artwork {
+  border-radius: 10px;
+  outline: 0;
+  box-shadow: 0 12px 26px -16px var(--home-polish-art-shadow);
+  transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.32s;
+}
+html .home-page :is(.home-rediscovery-album, .home-discovery-album-grid .home-cover-card):is(:hover, :focus-visible) .home-artwork {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 40px -18px var(--home-polish-art-shadow);
+}
+html .home-page :is(.home-rediscovery-album, .home-discovery-album-grid .home-cover-card):is(:hover, :focus-visible) strong {
+  text-decoration: none;
+}
+html .home-page .home-rediscovery-album strong { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+html .home-page .home-rediscovery-album span { font-size: 12.5px; }
+html .home-page .home-rediscovery-album small { font-size: 12px; }
+html .home-page .home-discovery-album-grid .home-cover-card strong { font-size: 14.5px; font-weight: 650; }
+html .home-page .home-discovery-album-grid .home-cover-card span { font-size: 12.5px; color: var(--theme-muted-text); }
+
+/* ---- Daily picks: ranked rows without hairlines ---- */
+html .home-page .home-discovery-track-grid { gap: 4px 44px; }
+html .home-page .home-daily-track-row {
+  margin-inline: -12px;
+  padding: 0 12px;
+  border-bottom: 0;
+  border-radius: 14px;
+  transition: background-color 0.18s;
+}
+html .home-page .home-daily-track-row:is(:hover, :has(:focus-visible)) { background: var(--home-polish-hover); }
+html .home-page .home-daily-track-row .home-discovery-track { min-height: 78px; padding: 10px 0; gap: 16px; }
+html .home-page .home-daily-track-row .home-discovery-track-number {
+  width: 30px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: var(--theme-subtle-text);
+  opacity: 0.8;
+}
+html .home-page .home-daily-track-row:is(:hover, :has(:focus-visible)) .home-discovery-track-number {
+  color: var(--home-polish-accent-text);
+  opacity: 1;
+}
+html .home-page .home-daily-track-row .home-artwork {
+  border-radius: 9px;
+  outline: 0;
+  box-shadow: 0 10px 20px -12px var(--home-polish-art-shadow);
+}
+html .home-page .home-daily-track-row .home-discovery-track-copy strong { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; }
+html .home-page .home-daily-track-row .home-discovery-track-copy small { font-size: 12.5px; }
+html .home-page .home-daily-track-row .home-discovery-track-play { opacity: 0; transition: opacity 0.18s; }
+html .home-page .home-daily-track-row:is(:hover, :has(:focus-visible), [data-current]) .home-discovery-track-play {
+  opacity: 1;
+  color: var(--home-polish-accent-text);
+}
+
+/* ---- Shortcuts ---- */
+html .home-page .home-discovery-shortcut-grid { gap: 8px 32px; }
+html .home-page .home-discovery-shortcut {
+  margin-inline: -12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  transition: background-color 0.18s;
+}
+html .home-page .home-discovery-shortcut .home-artwork {
+  border-radius: 12px;
+  outline: 0;
+  box-shadow: 0 12px 26px -16px var(--home-polish-art-shadow);
+}
+html .home-page .home-discovery-shortcut > span strong { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; }
+html .home-page .home-discovery-shortcut small { font-size: 12.5px; }
+
+/* ---- Featured album ---- */
+html .home-page .home-discovery-featured { gap: 40px; }
+html .home-page .home-discovery-featured .home-artwork {
+  border-radius: 16px;
+  outline: 0;
+  box-shadow: 0 24px 44px -24px var(--home-polish-art-shadow);
+}
+html .home-page .home-discovery-album-title {
+  font-size: clamp(26px, 2.9cqi, 36px);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+}
+html .home-page .home-discovery-featured-copy > span:first-of-type { font-size: 17px; }
+html .home-page .home-discovery-featured-copy .home-discovery-play {
+  min-height: 42px;
+  padding-inline: 22px;
+  font-size: 14.5px;
+}
+
+/* ---- Header buttons and year stepper ---- */
+html .home-page .home-discovery .home-discovery-play {
+  min-height: 36px;
+  padding: 0 18px;
+  border-radius: 999px;
+}
+html .home-page .home-discovery-year-controls > button {
+  width: 34px;
+  border-radius: 50%;
+  background: var(--theme-control-bg);
+}
+html .home-page .home-discovery-year-controls > button:not(:disabled):hover { background: var(--theme-control-bg-hover); }
+html .home-page .home-discovery-year-controls input { width: 84px; min-width: 84px; border-radius: 999px; }
+
+@container home (max-width: 820px) {
+  html .home-page .home-discovery-track-grid { gap: 4px 0; }
+}

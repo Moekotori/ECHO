@@ -1,0 +1,236 @@
+/*
+ * Home listening panels: this week, artist ranking, top tracks, listening
+ * profile and favorite albums. Structure and copy are unchanged; this file only
+ * re-skins the open layout from home-editorial.css / home-typography.css with
+ * larger numerals, rounded artwork and quiet hover feedback.
+ */
+
+html .home-page {
+  --home-polish-accent: var(--theme-accent-solid-bg);
+  --home-polish-accent-2: color-mix(in srgb, var(--theme-accent-solid-bg) 60%, var(--theme-accent-text-strong));
+  --home-polish-accent-text: color-mix(in srgb, var(--theme-accent-solid-bg) 62%, var(--theme-heading-text));
+  --home-polish-hover: color-mix(in srgb, var(--theme-heading-text) 6%, transparent);
+  --home-polish-art-shadow: color-mix(in srgb, var(--theme-heading-text) 22%, transparent);
+  --home-mix-1: var(--home-polish-accent);
+  --home-mix-2: var(--home-polish-accent-2);
+  --home-mix-3: color-mix(in srgb, var(--home-polish-accent) 50%, var(--home-polish-accent-2));
+  --home-mix-4: color-mix(in srgb, var(--theme-heading-text) 34%, transparent);
+  --home-mix-5: color-mix(in srgb, var(--theme-heading-text) 16%, transparent);
+}
+
+/* Section titles of these five panels */
+html .home-page :is(.home-listening-sidebar, .home-top-tracks-panel, .home-insights-grid) .home-section-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+html .home-page .home-listening-sidebar .home-section-header {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* ---- This week ---- */
+html .home-page .home-listening-sidebar .home-week-panel { gap: 22px; }
+html .home-page .home-week-summary { grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); gap: 16px; }
+html .home-page .home-listening-sidebar .home-week-stat { align-items: baseline; gap: 8px 6px; }
+html .home-page .home-listening-sidebar .home-week-stat strong {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+html .home-page .home-week-stat small { font-size: 14px; font-weight: 500; color: var(--theme-muted-text); }
+html .home-page .home-week-stat span { font-size: 12.5px; font-weight: 400; color: var(--theme-subtle-text); }
+
+html .home-page .home-week-heatmap {
+  --home-heatmap-0: color-mix(in srgb, var(--theme-heading-text) 7%, transparent);
+  --home-heatmap-1: color-mix(in srgb, var(--home-polish-accent) 30%, transparent);
+  --home-heatmap-2: color-mix(in srgb, var(--home-polish-accent) 52%, transparent);
+  --home-heatmap-3: color-mix(in srgb, var(--home-polish-accent) 76%, transparent);
+  --home-heatmap-4: color-mix(in srgb, var(--home-polish-accent) 70%, var(--home-polish-accent-2));
+  gap: 10px;
+}
+html .home-page .home-week-heatmap > * {
+  --home-week-cell: min(22px, calc((100cqw - 24px - 4px - 11 * 4px) / 12));
+}
+html .home-page :is(.home-week-grid, .home-weekdays, .home-week-months, .home-week-grid-shell) { gap: 4px; }
+html .home-page .home-week-grid-shell { grid-template-columns: 24px auto; }
+html .home-page :is(.home-week-cell, .home-week-legend i) { border-radius: 5px; box-shadow: none; }
+html .home-page :is(.home-week-cell, .home-week-legend i)[data-level="4"] {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--home-polish-accent) 45%, transparent);
+}
+html .home-page .home-week-cell { transition: transform 0.15s; }
+html .home-page .home-week-cell:not([data-future="true"]):hover { transform: scale(1.18); }
+html .home-page :is(.home-week-months, .home-weekdays) { font-size: 10.5px; font-weight: 500; }
+html .home-page .home-week-legend { font-size: 11px; font-weight: 500; margin-top: 2px; }
+
+/* ---- Artist ranking ---- */
+html .home-page .home-listening-sidebar .home-artist-rank-panel { gap: 14px; }
+html .home-page .home-artist-leaderboard { gap: 2px; }
+html .home-page .home-listening-sidebar .home-artist-rank-row {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  min-height: 60px;
+  padding: 9px 0;
+  border-radius: 12px;
+  overflow: visible;
+  background: transparent;
+  transition: background-color 0.18s;
+}
+html .home-page .home-listening-sidebar .home-artist-rank-row:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--home-polish-hover) 50%, transparent);
+}
+html .home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] { background: transparent; min-height: 66px; }
+html .home-page .home-listening-sidebar .home-artist-rank-number {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: var(--theme-subtle-text);
+  opacity: 0.8;
+}
+html .home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] .home-artist-rank-number,
+html .home-page .home-listening-sidebar .home-artist-rank-row:hover .home-artist-rank-number {
+  color: var(--home-polish-accent-text);
+  opacity: 1;
+}
+html .home-page .home-listening-sidebar .home-artist-rank-main strong { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+html .home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] .home-artist-rank-main strong { font-size: 17px; }
+html .home-page .home-listening-sidebar .home-artist-rank-meta { font-size: 12px; font-weight: 400; color: var(--theme-muted-text); }
+html .home-page .home-listening-sidebar .home-artist-rank-chip {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-muted-text);
+}
+html .home-page .home-listening-sidebar .home-artist-rank-meter {
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--theme-heading-text) 8%, transparent);
+}
+html .home-page .home-listening-sidebar .home-artist-rank-meter i {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theme-heading-text) 34%, transparent);
+}
+html .home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] .home-artist-rank-meter i,
+html .home-page .home-listening-sidebar .home-artist-rank-row:hover .home-artist-rank-meter i {
+  background: linear-gradient(90deg, var(--home-polish-accent), var(--home-polish-accent-2));
+}
+
+/* ---- Top tracks ---- */
+html .home-page .home-top-tracks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 44px; }
+html .home-page .home-top-track-row {
+  grid-template-columns: 30px 56px minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 0 16px;
+  min-height: 78px;
+  margin-inline: -12px;
+  width: calc(100% + 24px);
+  padding: 10px 12px;
+  border-radius: 14px;
+  transition: background-color 0.18s;
+}
+html .home-page .home-top-track-row:not(:disabled):is(:hover, :focus-visible) { background: var(--home-polish-hover); }
+html .home-page .home-top-track-rank {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: var(--theme-subtle-text);
+  opacity: 0.8;
+  text-align: left;
+}
+html .home-page .home-top-track-row:hover .home-top-track-rank {
+  color: var(--home-polish-accent-text);
+  opacity: 1;
+}
+html .home-page .home-top-track-art .home-artwork {
+  border-radius: 9px;
+  outline: 0;
+  box-shadow: 0 10px 20px -12px var(--home-polish-art-shadow);
+}
+html .home-page .home-top-track-copy strong { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; }
+html .home-page .home-top-track-copy small { font-size: 12.5px; color: var(--theme-muted-text); }
+html .home-page .home-top-track-meta { display: grid; gap: 3px; text-align: right; }
+html .home-page .home-top-track-meta :is(strong, small) { display: block; }
+html .home-page .home-top-track-meta strong { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+html .home-page .home-top-track-meta small { font-size: 12px; color: var(--theme-subtle-text); }
+@container home (max-width: 820px) {
+  html .home-page .home-top-tracks { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- Listening profile ---- */
+html .home-page .home-profile { gap: 32px; }
+html .home-page .home-profile-block { gap: 16px; }
+html .home-page .home-profile-block h3 { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; color: var(--theme-muted-text); }
+html .home-page .home-profile-mix { height: 10px; gap: 3px; border-radius: 999px; }
+html .home-page .home-profile-mix i { border-radius: 999px; }
+html .home-page .home-profile-legend { gap: 10px 24px; }
+html .home-page .home-profile-legend li { font-size: 13px; gap: 9px; }
+html .home-page .home-profile-legend li::before { width: 9px; height: 9px; border-radius: 50%; }
+html .home-page .home-profile-legend span { font-weight: 500; }
+html .home-page .home-profile-legend em { font-size: 13px; }
+html .home-page .home-profile-facts { gap: 24px 20px; }
+html .home-page .home-profile-fact { padding: 0; gap: 8px; }
+html .home-page .home-profile-fact span { font-size: 12.5px; font-weight: 400; color: var(--theme-subtle-text); }
+html .home-page .home-profile-fact strong {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+/* ---- Favorite albums ---- */
+html .home-page .home-favorite-album-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+html .home-page .home-favorite-album-card {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: start;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+}
+html .home-page .home-favorite-album-card .home-artwork {
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  outline: 0;
+  box-shadow: 0 12px 26px -16px var(--home-polish-art-shadow);
+  transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.32s;
+}
+html .home-page .home-favorite-album-card:is(:hover, :focus-visible) .home-artwork {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 40px -18px var(--home-polish-art-shadow);
+}
+html .home-page .home-favorite-album-rank {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: auto;
+  width: max-content;
+  z-index: 2;
+  padding: 3px 9px;
+  border-radius: 999px;
+  /* theme-color-allow: rank badge sits on cover art, independent of theme */
+  color: #fff;
+  /* theme-color-allow: rank badge sits on cover art, independent of theme */
+  background: rgba(0, 0, 0, 0.36);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+html .home-page .home-favorite-album-copy { grid-column: 1; grid-row: 2; padding: 12px 0 0; }
+html .home-page .home-favorite-album-copy strong { font-size: 14.5px; font-weight: 650; }
+html .home-page .home-favorite-album-copy small { font-size: 12.5px; color: var(--theme-muted-text); }
+html .home-page .home-favorite-album-copy em { font-size: 12px; font-style: normal; color: var(--theme-subtle-text); }
+html .home-page .home-favorite-album-card:not(:disabled):is(:hover, :focus-visible) strong { text-decoration: none; }
+@container home (max-width: 560px) {
+  html .home-page .home-favorite-album-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

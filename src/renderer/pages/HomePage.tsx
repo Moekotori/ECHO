@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/home.css';
+import '../styles/home-insights.css';
+import '../styles/home-editorial.css';
+import '../styles/home-insights-editorial.css';
+import '../styles/home-typography.css';
+import '../styles/home-listening-polish.css';
+import '../styles/home-discovery-polish.css';
+import '../styles/home-hero-polish.css';
+import '../styles/home-shelf-polish.css';
+import '../components/home/home-page-skeleton.css';
 import type { CSSProperties } from 'react';
 import type { AudioStatus } from '../../shared/types/audio';
 import type { AppSettings } from '../../shared/types/appSettings';
@@ -8,18 +17,14 @@ import {
   Album,
   ChevronLeft,
   ChevronRight,
-  Folder,
   History,
   Library,
   ListMusic,
-  Music2,
   Play,
-  Radio,
   RefreshCw,
   Shuffle,
   UserRound,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type {
   LibraryAlbum,
   LibrarySummary,
@@ -30,6 +35,7 @@ import type {
   PlaybackStatsAlbum,
   PlaybackStatsDashboard,
   PlaybackStatsDay,
+  PlaybackStatsTrack,
 } from '../../shared/types/library';
 import { translateCurrentLocale, useI18n } from '../i18n/I18nProvider';
 import { usePlaybackQueue } from '../stores/PlaybackQueueProvider';
@@ -37,20 +43,27 @@ import { useSharedPlaybackStatus } from '../stores/playbackStatusStore';
 import { openAlbumDetail, openAlbumDetailForTrack, resolveAlbumDetailNavigationTarget } from '../utils/albumNavigation';
 import { openArtistDetailByName } from '../utils/artistNavigation';
 import type { AppRouteId } from '../app/routes';
+import { HomeArtwork as Artwork, homeArtworkUrl } from '../components/home/HomeArtwork';
+import { HomeDiscovery } from '../components/home/HomeDiscovery';
+import { HomeLibraryOverview } from '../components/home/HomeLibraryOverview';
+import { HomeListeningProfile } from '../components/home/HomeListeningProfile';
+import { refreshHomeArtwork } from '../components/home/homeArtworkRefresh';
+import { HomeNowDetails } from '../components/home/HomeNowDetails';
+import { HomeRediscovery } from '../components/home/HomeRediscovery';
+import { HomeTopTracks } from '../components/home/HomeTopTracks';
+import { HomeWeeklyHeatmap } from '../components/home/HomeWeeklyHeatmap';
+import { formatCompactNumber, formatDuration, formatShortDate } from '../components/home/homeFormatters';
+import { addDays, compareDay, formatDateKey, startOfDay, startOfWeek, weeklyHeatmapWeeks } from '../components/home/homeWeekDates';
 
 const recentPageSize = 8;
 const recentPlayedAlbumHistoryPageSize = 12;
 const randomQueuePageSize = 36;
 const recentShelfPageSize = 4;
-const recommendedAlbumPageSize = 7;
-const artistLeaderboardLimit = 5;
+const recommendedAlbumPageSize = 8;
+const artistLeaderboardLimit = 8;
 const favoriteAlbumLimit = 4;
-const homeNowTitleMarqueeMinChars = 34;
-const homeNowTitleMarqueeOverflowPx = 12;
-const homeNowTitleMarqueeExitOverflowPx = 5;
 const homeNowMetaMarqueeOverflowPx = 8;
 const homeNowMetaMarqueeExitOverflowPx = 3;
-const weeklyHeatmapWeeks = 12;
 const signalBarCount = 48;
 const signalVisualFrameIntervalMs = 1000 / 30;
 const signalVisualScaleSettleThreshold = 0.0005;
@@ -240,13 +253,6 @@ type SignalBarModel = {
   targetOpacity: number;
   targetScale: number;
 };
-type MetricTileProps = {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  detail: string;
-  routeId: HomeRouteId;
-};
 type HomePageData = {
   recentAddedAlbums: LibraryAlbum[];
   recommendedAlbums: LibraryAlbum[];
@@ -303,62 +309,6 @@ const writeHomeScrollTop = (container: HTMLElement | Window | null, scrollTop: n
   }
 
   container.scrollTop = nextScrollTop;
-};
-
-const HomeNowTitle = ({ title }: { title: string }): JSX.Element => {
-  const titleRef = useRef<HTMLElement | null>(null);
-  const innerRef = useRef<HTMLSpanElement | null>(null);
-  const [shouldScroll, setShouldScroll] = useState(false);
-  const canScroll = title.trim().length >= homeNowTitleMarqueeMinChars;
-
-  useEffect(() => {
-    const element = titleRef.current;
-    const innerElement = innerRef.current;
-    if (!element || !innerElement || !canScroll) {
-      setShouldScroll(false);
-      return undefined;
-    }
-
-    let frameId: number | null = null;
-    const updateOverflow = (): void => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null;
-        const distance = Math.max(0, innerElement.scrollWidth - element.clientWidth);
-        element.style.setProperty('--home-now-title-marquee-distance', `${distance + 26}px`);
-        element.style.setProperty('--home-now-title-marquee-duration', `${Math.min(24, Math.max(10, distance / 18 + 8))}s`);
-        setShouldScroll((current) => {
-          const nextShouldScroll = current
-            ? distance > homeNowTitleMarqueeExitOverflowPx
-            : distance > homeNowTitleMarqueeOverflowPx;
-          return current === nextShouldScroll ? current : nextShouldScroll;
-        });
-      });
-    };
-
-    updateOverflow();
-
-    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(updateOverflow) : null;
-    resizeObserver?.observe(element);
-    window.addEventListener('resize', updateOverflow);
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updateOverflow);
-    };
-  }, [canScroll, title]);
-
-  return (
-    <strong className="home-now-title" data-scroll={shouldScroll ? 'true' : undefined} ref={titleRef} title={title}>
-      <span ref={innerRef}>{title}</span>
-    </strong>
-  );
 };
 
 const HomeNowMeta = ({
@@ -805,42 +755,6 @@ export const resetHomePageCacheForTest = (): void => {
   }
 };
 
-const formatCompactNumber = (value: number): string => {
-  if (!Number.isFinite(value)) {
-    return '0';
-  }
-
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: value >= 1000 ? 1 : 0, notation: value >= 10000 ? 'compact' : 'standard' }).format(value);
-};
-
-const formatDuration = (seconds: number, t: ReturnType<typeof useI18n>['t']): string => {
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return t('home.duration.zeroMinutes');
-  }
-
-  const totalMinutes = Math.round(seconds / 60);
-  if (totalMinutes < 60) {
-    return t('home.duration.minutes', { count: totalMinutes });
-  }
-
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes > 0 ? t('home.duration.hoursMinutes', { hours, minutes }) : t('home.duration.hoursOnly', { hours });
-};
-
-const formatShortDate = (value: string | null, t: ReturnType<typeof useI18n>['t'], locale: string): string => {
-  if (!value) {
-    return t('home.date.none');
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return t('home.date.unknown');
-  }
-
-  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
-};
-
 const ArtistLeaderboard = ({
   artists,
   onOpenArtist,
@@ -860,7 +774,6 @@ const ArtistLeaderboard = ({
         <UserRound size={18} />
         <span>
           <strong>{t('home.artistLeaderboard.emptyTitle')}</strong>
-          <small>{t('home.artistLeaderboard.emptyDescription')}</small>
         </span>
       </div>
     );
@@ -1041,38 +954,6 @@ const FavoriteAlbumGrid = ({
     </div>
   );
 };
-
-const startOfDay = (date: Date): Date => {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
-
-const addDays = (date: Date, days: number): Date => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const startOfWeek = (date: Date): Date => {
-  const next = startOfDay(date);
-  const day = next.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  next.setDate(next.getDate() + mondayOffset);
-  return next;
-};
-
-const compareDay = (left: Date, right: Date): number => startOfDay(left).getTime() - startOfDay(right).getTime();
-
-const formatDateKey = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const formatMonthLabel = (date: Date, t: ReturnType<typeof useI18n>['t']): string =>
-  t('home.month.label', { month: date.getMonth() + 1 });
 
 const clampSignal = (value: number): number => Math.max(0, Math.min(1, value));
 
@@ -1291,7 +1172,7 @@ const useHomeWaveformVisualizerEnabled = (): boolean => {
 };
 
 const useHomeRandomHeroTitleEnabled = (): boolean => {
-  const [enabled, setEnabled] = useState(() => cachedHomeRandomHeroTitleEnabled ?? true);
+  const [enabled, setEnabled] = useState(() => cachedHomeRandomHeroTitleEnabled ?? false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1323,18 +1204,6 @@ const useHomeRandomHeroTitleEnabled = (): boolean => {
   return enabled;
 };
 
-const homeArtworkUrl = (
-  source: { coverId?: string | null; coverThumb?: string | null; coverSnapshot?: string | null },
-  variant: 'album' | 'large' | 'thumb' = 'album',
-): string | null => {
-  const fallback = source.coverThumb ?? source.coverSnapshot ?? null;
-  if (source.coverId) {
-    return `echo-cover://${variant}/${encodeURIComponent(source.coverId)}`;
-  }
-
-  return fallback?.replace(/^echo-cover:\/\/(?:thumb|album|large|original)\//u, `echo-cover://${variant}/`) ?? fallback;
-};
-
 const trackFromHistory = (entry: PlaybackHistoryEntry): LibraryTrack => ({
   id: entry.stableKey ?? entry.trackId ?? entry.id,
   mediaType: entry.mediaType,
@@ -1360,27 +1229,17 @@ const trackFromHistory = (entry: PlaybackHistoryEntry): LibraryTrack => ({
   fieldSources: {},
 });
 
-const Artwork = ({ coverThumb, title, size = 92 }: { coverThumb: string | null; title: string; size?: number }): JSX.Element => (
-  <div className="home-artwork" data-empty={!coverThumb} style={{ '--home-artwork-size': `${size}px` } as CSSProperties}>
-    {coverThumb ? <img alt="" src={coverThumb} /> : <Music2 size={Math.max(22, Math.round(size * 0.28))} />}
-    <span className="sr-only">{title}</span>
+const CoverRailSkeleton = ({ count, railClassName }: { count: number; railClassName: string }): JSX.Element => (
+  <div className={railClassName} aria-hidden="true">
+    {Array.from({ length: count }, (_, index) => (
+      <div className="home-cover-skeleton" key={index}>
+        <span className="home-skeleton-block home-skeleton-art" />
+        <span className="home-skeleton-block home-skeleton-line" />
+        <span className="home-skeleton-block home-skeleton-line home-skeleton-line--short" />
+      </div>
+    ))}
   </div>
 );
-
-const MetricTile = ({ icon: Icon, label, value, detail, routeId }: MetricTileProps): JSX.Element => {
-  const { t } = useI18n();
-
-  return (
-    <button className="home-metric-tile" type="button" aria-label={t('home.metric.openAria', { label })} onClick={() => navigateHomeRoute(routeId)}>
-      <Icon size={19} />
-      <div>
-        <strong>{value}</strong>
-        <span>{label}</span>
-        <small>{detail}</small>
-      </div>
-    </button>
-  );
-};
 
 const SectionHeader = ({
   title,
@@ -1785,125 +1644,6 @@ const scheduleHomeStartupWork = (callback: () => void, delayMs = 0): (() => void
   };
 };
 
-const WeeklyHeatmap = ({ days }: { days: PlaybackStatsDay[] }): JSX.Element => {
-  const { t } = useI18n();
-  const today = startOfDay(new Date());
-  const currentWeekStart = startOfWeek(today);
-  const firstWeekStart = addDays(currentWeekStart, -7 * (weeklyHeatmapWeeks - 1));
-  const gridEnd = addDays(currentWeekStart, 6);
-  const activityByDate = new Map(days.map((day) => [day.date, day]));
-  const cells: Array<{
-    date: Date;
-    dateKey: string;
-    isFuture: boolean;
-    playCount: number;
-    playedSeconds: number;
-  }> = [];
-
-  for (let day = firstWeekStart; compareDay(day, gridEnd) <= 0; day = addDays(day, 1)) {
-    const date = startOfDay(day);
-    const dateKey = formatDateKey(date);
-    const activity = activityByDate.get(dateKey);
-    cells.push({
-      date,
-      dateKey,
-      isFuture: compareDay(date, today) > 0,
-      playCount: activity?.playCount ?? 0,
-      playedSeconds: activity?.playedSeconds ?? 0,
-    });
-  }
-
-  const weeks = Array.from({ length: weeklyHeatmapWeeks }, (_, index) => cells.slice(index * 7, index * 7 + 7));
-  const maxCount = Math.max(...cells.map((day) => day.playCount), 1);
-  const monthStarts = weeks.reduce<Array<{ label: string; month: number; span: number; week: number; year: number }>>((labels, week, weekIndex) => {
-    const firstDay = week[0]?.date;
-
-    if (!firstDay) {
-      return labels;
-    }
-
-    const lastLabel = labels.at(-1);
-    if (!lastLabel || firstDay.getMonth() !== lastLabel.month || firstDay.getFullYear() !== lastLabel.year) {
-      labels.push({
-        label: formatMonthLabel(firstDay, t),
-        month: firstDay.getMonth(),
-        span: 1,
-        week: weekIndex,
-        year: firstDay.getFullYear(),
-      });
-      return labels;
-    }
-
-    lastLabel.span += 1;
-    return labels;
-  }, []);
-  const activeWeeks = weeks.filter((week) => week.some((day) => !day.isFuture && day.playCount > 0)).length;
-  const getLevel = (count: number): number => {
-    if (count <= 0) {
-      return 0;
-    }
-
-    const ratio = count / maxCount;
-    if (ratio >= 0.8) {
-      return 4;
-    }
-    if (ratio >= 0.55) {
-      return 3;
-    }
-    if (ratio >= 0.25) {
-      return 2;
-    }
-    return 1;
-  };
-
-  return (
-    <div className="home-week-heatmap">
-      <div className="home-week-months" style={{ gridTemplateColumns: `24px repeat(${weeklyHeatmapWeeks}, var(--home-week-cell))` }}>
-        {monthStarts.map((month) => (
-          <span key={`${month.year}-${month.month}`} style={{ gridColumn: `${month.week + 2} / span ${month.span}` }}>
-            {month.label}
-          </span>
-        ))}
-      </div>
-      <div className="home-week-grid-shell">
-        <div className="home-weekdays" aria-hidden="true">
-          <span>{t('home.weekday.mon')}</span>
-          <span />
-          <span>{t('home.weekday.wed')}</span>
-          <span />
-          <span>{t('home.weekday.fri')}</span>
-          <span />
-          <span />
-        </div>
-        <div
-          className="home-week-grid"
-          style={{ gridTemplateColumns: `repeat(${weeklyHeatmapWeeks}, var(--home-week-cell))` }}
-          aria-label={t('home.weeklyHeatmap.aria', { weeks: weeklyHeatmapWeeks })}
-        >
-          {cells.map((day) => (
-            <span
-              className="home-week-cell"
-              data-future={day.isFuture ? 'true' : undefined}
-              data-level={day.isFuture ? 0 : getLevel(day.playCount)}
-              key={day.dateKey}
-              title={t('home.weeklyHeatmap.dayTitle', { date: day.dateKey, playCount: day.playCount, duration: formatDuration(day.playedSeconds, t) })}
-              aria-label={t('home.weeklyHeatmap.dayAria', { date: day.dateKey, playCount: day.playCount })}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="home-week-legend" aria-hidden="true">
-        <span>{t('home.weeklyHeatmap.activeWeeks', { count: activeWeeks })}</span>
-        <i data-level={0} />
-        <i data-level={1} />
-        <i data-level={2} />
-        <i data-level={3} />
-        <i data-level={4} />
-      </div>
-    </div>
-  );
-};
-
 export const HomePage = (): JSX.Element => {
   const { locale, t } = useI18n();
   const queue = usePlaybackQueue();
@@ -1954,8 +1694,12 @@ export const HomePage = (): JSX.Element => {
     cachedHomeHeroTitle = pickHomeHeroTitle(cachedHomeHeroTitle);
     return cachedHomeHeroTitle;
   });
-  const homeHeroTitle = homeRandomHeroTitleEnabled ? randomHomeHeroTitle : t('home.hero.defaultTitle');
-  const topArtist = stats?.topArtists[0]?.artist ?? focusTrack?.artist ?? 'ECHO';
+  const focusTrackTitle = homeRandomHeroTitleEnabled ? randomHomeHeroTitle : focusTrack?.title ?? t('nowPlaying.emptyTitle');
+  const queueSource = queue.currentItem?.source;
+  const isDuplicateAlbumSource = queueSource?.type === 'album' &&
+    !queue.playlistPlayback?.active &&
+    queueSource.label.trim() === focusTrack?.album?.trim();
+  const focusTrackVisualKey = focusTrack?.id ?? focusTrack?.path ?? focusTrack?.title ?? 'idle';
 
   useEffect(() => {
     historySummaryRef.current = historySummary;
@@ -1967,6 +1711,7 @@ export const HomePage = (): JSX.Element => {
 
   useEffect(() => {
     let cancelled = false;
+    if (!homeRandomHeroTitleEnabled) return;
     void personalizeHomeHeroTitle(randomHomeHeroTitle).then((nextTitle) => {
       if (cancelled || nextTitle === randomHomeHeroTitle) {
         return;
@@ -1977,7 +1722,7 @@ export const HomePage = (): JSX.Element => {
     return () => {
       cancelled = true;
     };
-  }, [randomHomeHeroTitle]);
+  }, [homeRandomHeroTitleEnabled, randomHomeHeroTitle]);
 
   const playTrack = useCallback(
     async (track: LibraryTrack): Promise<void> => {
@@ -1992,6 +1737,27 @@ export const HomePage = (): JSX.Element => {
     },
     [queue, recentTracks],
   );
+
+  const playTopTrack = useCallback(async (statsTrack: PlaybackStatsTrack): Promise<void> => {
+    const library = window.echo?.library;
+    if (!statsTrack.trackId || !library?.getTrack) {
+      setError(t('home.error.trackNotFound', { title: statsTrack.title }));
+      return;
+    }
+
+    try {
+      setError(null);
+      const track = await library.getTrack(statsTrack.trackId);
+      if (!track || track.unavailable) {
+        setError(t('home.error.trackNotFound', { title: statsTrack.title }));
+        return;
+      }
+
+      await queue.playTrack(track, { source: { type: 'manual', label: 'ECHO Home' } });
+    } catch (playError) {
+      setError(playError instanceof Error ? playError.message : String(playError));
+    }
+  }, [queue, t]);
 
   const generateRandomQueue = useCallback(async (): Promise<void> => {
     if (isPlaybackPriorityActive) {
@@ -2389,6 +2155,7 @@ export const HomePage = (): JSX.Element => {
       return;
     }
 
+    refreshHomeArtwork();
     setRecentShelfPage(0);
     await loadHome();
   }, [isPlaybackPriorityBlocking, loadHome]);
@@ -2639,16 +2406,6 @@ export const HomePage = (): JSX.Element => {
     setRecentShelfPage((currentPage) => Math.min(currentPage, lastPage));
   }, [recentAddedAlbums.length, recentPanelMode, recentPlayedAlbums.length]);
 
-  const pulseTiles = useMemo<MetricTileProps[]>(
-    () => [
-      { icon: Music2, label: t('home.metric.songs'), value: formatCompactNumber(summary.songCount), detail: t('home.metric.songsDetail', { duration: formatDuration(summary.totalDuration, t) }), routeId: 'songs' },
-      { icon: Album, label: t('home.metric.albums'), value: formatCompactNumber(summary.albumCount), detail: t('home.metric.albumsDetail'), routeId: 'albums' },
-      { icon: UserRound, label: t('home.metric.artists'), value: formatCompactNumber(summary.artistCount), detail: topArtist, routeId: 'artists' },
-      { icon: Folder, label: t('home.metric.folders'), value: formatCompactNumber(summary.folderCount), detail: t('home.metric.foldersDetail', { date: formatShortDate(summary.lastScanAt, t, locale) }), routeId: 'folders' },
-    ],
-    [locale, summary, t, topArtist],
-  );
-
   const recentHistoryActivityFallback = useMemo(() => buildRecentHistoryActivityFallback(recentHistory), [recentHistory]);
   const statsDailyActivity = stats?.dailyActivity ?? [];
   const weeklyHeatmapDays = hasDailyActivityContent(statsDailyActivity) ? statsDailyActivity : recentHistoryActivityFallback.dailyActivity;
@@ -2665,198 +2422,208 @@ export const HomePage = (): JSX.Element => {
 
   return (
     <div className="home-page" ref={pageRootRef}>
-      <section className="home-hero" aria-label={t('home.hero.aria')}>
-        <div className="home-hero-copy">
-          <span className="home-signal-label">
-            <Radio size={15} />
-            {t('home.hero.kicker')}
-          </span>
-          <h1>{homeHeroTitle}</h1>
-          <p>
-            {focusTrack
-              ? t('home.hero.description.resume', { artist: focusTrack.artist || t('queue.unknownArtist'), title: focusTrack.title })
-              : t('home.hero.description.empty')}
-          </p>
-          <div className="home-hero-actions">
-            <button className="home-primary-action" type="button" disabled={!focusTrack} onClick={() => focusTrack && void playTrack(focusTrack)}>
-              <Play size={17} fill="currentColor" />
-              {t('home.hero.action.continue')}
-            </button>
-            <button className="home-secondary-action" type="button" onClick={() => navigateHomeRoute('queue')}>
-              <ListMusic size={17} />
-              {t('home.hero.action.viewQueue')}
-            </button>
-            <button className="home-secondary-action" type="button" disabled={isLoading || isPlaybackPriorityBlocking} onClick={() => void refreshHome()}>
-              <RefreshCw size={17} />
-              {isLoading ? t('home.recommend.refreshing') : t('home.recommend.refresh')}
-            </button>
-            <button className="home-secondary-action" type="button" disabled={summary.songCount <= 0 || isGeneratingRandomQueue || isPlaybackPriorityActive} onClick={() => void generateRandomQueue()}>
-              <Shuffle size={17} />
-              {isGeneratingRandomQueue ? t('queue.action.generatingRandom') : t('queue.action.generateRandom')}
-            </button>
-          </div>
-        </div>
-
-        <div className="home-now-card" data-empty={!focusTrack} data-signal-enabled={homeWaveformVisualizerEnabled}>
-          <div className="home-now-artwork-stack">
-            <Artwork coverThumb={focusTrack ? homeArtworkUrl(focusTrack, 'album') : null} title={focusTrack?.title ?? t('nowPlaying.emptyTitle')} size={132} />
-          </div>
-          <div className="home-now-copy">
-            <span>{queue.currentTrack ? t('home.hero.nowPlaying') : t('home.hero.recentSignal')}</span>
-            <HomeNowTitle title={focusTrack?.title ?? t('nowPlaying.emptyTitle')} />
-            <HomeNowMeta track={focusTrack} onOpenAlbum={(track) => void openTrackAlbum(track)} onOpenArtist={(artistName) => void openTrackArtist(artistName)} />
-          </div>
-          {homeWaveformVisualizerEnabled ? (
-            <SignalVisualizer seed={audioStatus?.currentTrackId ?? focusTrack?.id ?? focusTrack?.path ?? focusTrack?.title ?? 'idle'} status={audioStatus} />
-          ) : null}
-        </div>
-      </section>
-
-      <section className="home-pulse" aria-label={t('home.hero.statsAria')}>
-        <div className="home-metric-grid">
-          {pulseTiles.map((tile) => (
-            <MetricTile key={tile.label} {...tile} />
-          ))}
-        </div>
-      </section>
-
-      <section className="home-content-grid">
-        <div className="home-panel home-recent-panel" data-mode={recentPanelMode}>
-          <header className="home-section-header home-recent-header">
-            <div className="home-recent-title-row">
-              <h2>{t('home.recent.title')}</h2>
-              <div className="home-segmented-control" role="tablist" aria-label={t('home.recent.tabsAria')}>
-                <button type="button" role="tab" aria-selected={recentPanelMode === 'played'} data-active={recentPanelMode === 'played'} onClick={() => changeRecentPanelMode('played')}>
-                  {t('home.recent.tab.played')}
+      <div className="home-intro-layout">
+        <section className="home-hero" aria-label={t('home.hero.aria')}>
+          <div className="home-now-card" data-empty={!focusTrack} data-signal-enabled={homeWaveformVisualizerEnabled}>
+            <div className="home-now-artwork-stack">
+              <Artwork coverThumb={focusTrack ? homeArtworkUrl(focusTrack, 'album') : null} title={focusTrackTitle} size={240} fetchPriority="high" />
+            </div>
+            <div className="home-hero-copy">
+              <div className="home-now-copy">
+                <h1 className="home-now-title" title={focusTrackTitle}>{focusTrackTitle}</h1>
+                <HomeNowMeta track={focusTrack} onOpenAlbum={(track) => void openTrackAlbum(track)} onOpenArtist={(artistName) => void openTrackArtist(artistName)} />
+              </div>
+              {queue.currentSourceLabel && (queue.currentTrack || queue.lastPlayedTrack) && !isDuplicateAlbumSource ? (
+                <p className="home-continue-source">{t('home.continue.source', { source: queue.currentSourceLabel })}</p>
+              ) : null}
+              <div className="home-hero-actions">
+                <button className="home-primary-action" type="button" disabled={!focusTrack || focusTrack.unavailable} onClick={() => focusTrack && void playTrack(focusTrack)}>
+                  <Play size={17} fill="currentColor" />
+                  {t('home.hero.action.continue')}
                 </button>
-                <button type="button" role="tab" aria-selected={recentPanelMode === 'added'} data-active={recentPanelMode === 'added'} onClick={() => changeRecentPanelMode('added')}>
-                  {t('home.recent.tab.added')}
+                <button className="home-secondary-action" type="button" onClick={() => navigateHomeRoute('queue')}>
+                  <ListMusic size={17} />
+                  {t('home.hero.action.viewQueue')}
+                </button>
+                <button className="home-secondary-action" type="button" disabled={isLoading || isPlaybackPriorityBlocking} onClick={() => void refreshHome()}>
+                  <RefreshCw size={17} />
+                  {isLoading ? t('home.recommend.refreshing') : t('home.recommend.refresh')}
+                </button>
+                <button className="home-secondary-action" type="button" disabled={summary.songCount <= 0 || isGeneratingRandomQueue || isPlaybackPriorityActive} onClick={() => void generateRandomQueue()}>
+                  <Shuffle size={17} />
+                  {isGeneratingRandomQueue ? t('queue.action.generatingRandom') : t('queue.action.generateRandom')}
                 </button>
               </div>
+              {focusTrack ? (
+                <HomeNowDetails key={`details:${focusTrackVisualKey}`} isCurrentTrack={focusTrack.id === queue.currentTrack?.id} track={focusTrack} />
+              ) : null}
             </div>
-            <div className="home-activity-actions">
-              <button
-                className="home-shelf-arrow"
-                type="button"
-                aria-label={t('home.recent.prevPage')}
-                disabled={recentShelfPage <= 0}
-                onClick={() => setRecentShelfPage((page) => Math.max(0, page - 1))}
-              >
-                <ChevronLeft size={15} />
-              </button>
-              <button
-                className="home-shelf-arrow"
-                type="button"
-                aria-label={t('home.recent.nextPage')}
-                disabled={recentShelfPage >= recentTotalPages - 1}
-                onClick={() => setRecentShelfPage((page) => Math.min(recentTotalPages - 1, page + 1))}
-              >
-                <ChevronRight size={15} />
-              </button>
-              <button
-                className="home-shelf-arrow"
-                type="button"
-                aria-label={t('home.recommend.refresh')}
-                disabled={isRefreshingRecentActivity || isPlaybackPriorityBlocking}
-                onClick={() => void refreshRecentActivity()}
-              >
-                <RefreshCw size={15} className={isRefreshingRecentActivity ? 'spinning-icon' : undefined} />
-              </button>
-            </div>
-          </header>
+            {homeWaveformVisualizerEnabled ? (
+              <SignalVisualizer seed={audioStatus?.currentTrackId ?? focusTrackVisualKey} status={audioStatus} />
+            ) : null}
+          </div>
+        </section>
+      </div>
 
-          {recentPanelMode === 'added' ? (
-            recentAddedAlbums.length > 0 ? (
-              <div className="home-cover-rail">
-                {visibleRecentAddedAlbums.map((album) => (
-                  <button className="home-cover-card" key={album.id} type="button" onClick={() => openRecommendedAlbum(album)}>
-                    <Artwork coverThumb={homeArtworkUrl(album, 'large')} title={album.title} size={176} />
-                    <strong>{album.title}</strong>
-                    <span>{album.albumArtist || t('queue.unknownArtist')} · {t('home.count.tracks', { count: album.trackCount })}</span>
+      <HomeLibraryOverview summary={summary} onNavigate={navigateHomeRoute} />
+
+      <div className="home-discovery-layout">
+        <div className="home-music-shelves">
+          <section className="home-panel home-recent-panel" data-mode={recentPanelMode}>
+            <header className="home-section-header home-recent-header">
+              <div className="home-recent-title-row">
+                <h2>{t('home.recent.title')}</h2>
+                <div className="home-recent-tabs" role="tablist" aria-label={t('home.recent.tabsAria')}>
+                  <button type="button" role="tab" aria-selected={recentPanelMode === 'played'} data-active={recentPanelMode === 'played'} onClick={() => changeRecentPanelMode('played')}>
+                    {t('home.recent.tab.played')}
+                  </button>
+                  <button type="button" role="tab" aria-selected={recentPanelMode === 'added'} data-active={recentPanelMode === 'added'} onClick={() => changeRecentPanelMode('added')}>
+                    {t('home.recent.tab.added')}
+                  </button>
+                </div>
+              </div>
+              <div className="home-activity-actions">
+                <button
+                  className="home-shelf-arrow"
+                  type="button"
+                  aria-label={t('home.recent.prevPage')}
+                  disabled={recentShelfPage <= 0}
+                  onClick={() => setRecentShelfPage((page) => Math.max(0, page - 1))}
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <button
+                  className="home-shelf-arrow"
+                  type="button"
+                  aria-label={t('home.recent.nextPage')}
+                  disabled={recentShelfPage >= recentTotalPages - 1}
+                  onClick={() => setRecentShelfPage((page) => Math.min(recentTotalPages - 1, page + 1))}
+                >
+                  <ChevronRight size={15} />
+                </button>
+                <button
+                  className="home-shelf-arrow"
+                  type="button"
+                  aria-label={t('home.recommend.refresh')}
+                  disabled={isRefreshingRecentActivity || isPlaybackPriorityBlocking}
+                  onClick={() => void refreshRecentActivity()}
+                >
+                  <RefreshCw size={15} className={isRefreshingRecentActivity ? 'spinning-icon' : undefined} />
+                </button>
+              </div>
+            </header>
+
+            {recentPanelMode === 'added' ? (
+              recentAddedAlbums.length > 0 ? (
+                <div className="home-cover-rail home-rail-transition" key={`added-${recentShelfPage}`}>
+                  {visibleRecentAddedAlbums.map((album) => (
+                    <button className="home-cover-card" key={album.id} type="button" onClick={() => openRecommendedAlbum(album)}>
+                      <Artwork coverThumb={homeArtworkUrl(album, 'album')} title={album.title} size={176} />
+                      <strong>{album.title}</strong>
+                      <span>{album.albumArtist || t('queue.unknownArtist')} · {t('home.count.tracks', { count: album.trackCount })}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : isLoading ? (
+                <CoverRailSkeleton count={recentShelfPageSize} railClassName="home-cover-rail" />
+              ) : (
+                <div className="home-empty-panel">
+                  <Library size={24} />
+                  <strong>{t('home.recent.emptyAddedTitle')}</strong>
+                </div>
+              )
+            ) : recentPlayedAlbums.length > 0 ? (
+              <div className="home-cover-rail home-played-rail home-rail-transition" key={`played-${recentShelfPage}`}>
+                {visibleRecentPlayedAlbums.map((item) => (
+                  <button className="home-cover-card" key={item.album.id} type="button" onClick={() => openRecommendedAlbum(item.album)}>
+                    <Artwork coverThumb={homeArtworkUrl(item.album, 'album')} title={item.album.title} size={156} />
+                    <strong>{item.album.title}</strong>
+                    <span>{item.album.albumArtist || t('queue.unknownArtist')} · {formatShortDate(item.startedAt, t, locale)}</span>
                   </button>
                 ))}
               </div>
+            ) : isLoading ? (
+              <CoverRailSkeleton count={recentShelfPageSize} railClassName="home-cover-rail home-played-rail" />
             ) : (
-              <div className="home-empty-panel">
-                <Library size={24} />
-                <strong>{t('home.recent.emptyAddedTitle')}</strong>
-                <span>{t('home.recent.emptyAddedDescription')}</span>
-              </div>
-            )
-          ) : recentPlayedAlbums.length > 0 ? (
-            <div className="home-cover-rail home-played-rail">
-              {visibleRecentPlayedAlbums.map((item) => (
-                <button className="home-cover-card" key={item.album.id} type="button" onClick={() => openRecommendedAlbum(item.album)}>
-                  <Artwork coverThumb={homeArtworkUrl(item.album, 'large')} title={item.album.title} size={156} />
-                  <strong>{item.album.title}</strong>
-                  <span>{item.album.albumArtist || t('queue.unknownArtist')} · {formatShortDate(item.startedAt, t, locale)}</span>
+                <div className="home-empty-panel">
+                  <History size={24} />
+                  <strong>{t('home.recent.emptyPlayedTitle')}</strong>
+                </div>
+              )}
+          </section>
+
+          <section className="home-panel home-recommend-panel" data-empty={recommendedAlbums.length === 0}>
+            <SectionHeader
+              title={t('home.recommend.title')}
+              action={
+                <button type="button" disabled={isRefreshingRecommendations || summary.albumCount <= 0 || isPlaybackPriorityBlocking} onClick={() => void refreshRecommendedAlbums()}>
+                  <RefreshCw size={15} />
+                  {isRefreshingRecommendations ? t('home.recommend.refreshing') : t('home.recommend.refresh')}
                 </button>
-              ))}
-            </div>
-          ) : (
-              <div className="home-empty-panel">
-                <History size={24} />
-                <strong>{t('home.recent.emptyPlayedTitle')}</strong>
-                <span>{t('home.recent.emptyPlayedDescription')}</span>
+              }
+            />
+            {recommendedAlbums.length > 0 ? (
+              <div className="home-cover-rail home-recommend-rail home-rail-transition" key={recommendedAlbums[0]?.id ?? 'recommend'}>
+                {recommendedAlbums.map((album) => (
+                  <button className="home-cover-card" key={album.id} type="button" onClick={() => openRecommendedAlbum(album)}>
+                    <Artwork coverThumb={homeArtworkUrl(album, 'album')} title={album.title} size={176} />
+                    <strong>{album.title}</strong>
+                    <span>
+                      {album.albumArtist || t('queue.unknownArtist')} · {t('home.count.tracks', { count: album.trackCount })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : isLoading ? (
+              <CoverRailSkeleton count={recommendedAlbumPageSize} railClassName="home-cover-rail home-recommend-rail" />
+            ) : (
+              <div className="home-empty-panel home-empty-panel--compact">
+                <Album size={24} />
+                <strong>{t('home.recommend.emptyTitle')}</strong>
               </div>
             )}
+          </section>
+
+          <HomeRediscovery albums={stats?.topAlbums ?? []} recentHistory={recentHistory}
+            currentTrack={queue.currentTrack} onOpenAlbum={openFavoriteAlbum} />
+
+          <section className="home-panel home-top-tracks-panel" data-empty={(stats?.topTracks.length ?? 0) === 0}>
+            <SectionHeader title={t('home.topTracks.title')} actionLabel={t('route.history.label')} routeId="history" />
+            <HomeTopTracks tracks={stats?.topTracks ?? []} currentTrackId={queue.currentTrack?.id ?? null} onPlayTrack={(track) => void playTopTrack(track)} />
+          </section>
         </div>
-
-        <div className="home-panel home-week-panel" data-empty={!hasWeeklyActivity}>
-          <SectionHeader title={t('home.week.title')} actionLabel={t('route.history.label')} routeId="history" />
-          <div className="home-week-summary">
-            <div className="home-week-stat">
-              <span>{t('home.week.playCount')}</span>
-              <strong>{formatCompactNumber(weeklyPlayCount)}</strong>
-              <small>{t('home.week.times')}</small>
+        <aside className="home-listening-sidebar" aria-label={t('home.insights.aria')}>
+          <section className="home-activity-grid" aria-label={t('home.week.title')}>
+            <div className="home-panel home-week-panel" data-empty={!hasWeeklyActivity}>
+              <SectionHeader title={t('home.week.title')} actionLabel={t('route.history.label')} routeId="history" />
+              <div className="home-week-summary">
+                <div className="home-week-stat">
+                  <span>{t('home.week.playCount')}</span>
+                  <strong>{formatCompactNumber(weeklyPlayCount)}</strong>
+                  <small>{t('home.week.times')}</small>
+                </div>
+                <div className="home-week-stat">
+                  <span>{t('home.week.listenDuration')}</span>
+                  <strong>{formatDuration(weeklyDuration, t)}</strong>
+                </div>
+              </div>
+              <HomeWeeklyHeatmap days={weeklyHeatmapDays} todayStartMs={startOfDay(new Date()).getTime()} />
             </div>
-            <div className="home-week-stat">
-              <span>{t('home.week.listenDuration')}</span>
-              <strong>{formatDuration(weeklyDuration, t)}</strong>
+          </section>
+
+          <section className="home-stats-grid" aria-label={t('home.preferences.aria')}>
+            <div className="home-panel home-artist-rank-panel" data-empty={(stats?.topArtists.length ?? 0) === 0}>
+              <SectionHeader title={t('home.artistLeaderboard.title')} />
+              <ArtistLeaderboard artists={stats?.topArtists ?? []} onOpenArtist={(artistName) => void openTrackArtist(artistName)} />
             </div>
-          </div>
-          <WeeklyHeatmap days={weeklyHeatmapDays} />
-          {!hasWeeklyActivity ? (
-            <p className="home-week-hint">{t('home.week.emptyHint')}</p>
-          ) : null}
-        </div>
-      </section>
+          </section>
+        </aside>
+      </div>
 
-      <section className="home-panel home-recommend-panel" data-empty={recommendedAlbums.length === 0}>
-        <SectionHeader
-          title={t('home.recommend.title')}
-          action={
-            <button type="button" disabled={isRefreshingRecommendations || summary.albumCount <= 0 || isPlaybackPriorityBlocking} onClick={() => void refreshRecommendedAlbums()}>
-              <RefreshCw size={15} />
-              {isRefreshingRecommendations ? t('home.recommend.refreshing') : t('home.recommend.refresh')}
-            </button>
-          }
-        />
-        {recommendedAlbums.length > 0 ? (
-          <div className="home-cover-rail home-recommend-rail">
-            {recommendedAlbums.map((album) => (
-              <button className="home-cover-card" key={album.id} type="button" onClick={() => openRecommendedAlbum(album)}>
-                <Artwork coverThumb={homeArtworkUrl(album, 'large')} title={album.title} size={176} />
-                <strong>{album.title}</strong>
-                <span>
-                  {album.albumArtist || t('queue.unknownArtist')} · {t('home.count.tracks', { count: album.trackCount })}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="home-empty-panel home-empty-panel--compact">
-            <Album size={24} />
-            <strong>{t('home.recommend.emptyTitle')}</strong>
-            <span>{t('home.recommend.emptyDescription')}</span>
-          </div>
-        )}
-      </section>
-
-      <section className="home-stats-grid" aria-label={t('home.preferences.aria')}>
-        <div className="home-panel home-artist-rank-panel" data-empty={(stats?.topArtists.length ?? 0) === 0}>
-          <SectionHeader title={t('home.artistLeaderboard.title')} />
-          <ArtistLeaderboard artists={stats?.topArtists ?? []} onOpenArtist={(artistName) => void openTrackArtist(artistName)} />
+      <section className="home-insights-grid" aria-label={t('home.insights.aria')}>
+        <div className="home-panel home-profile-panel" data-empty={!hasStatsContent(stats)}>
+          <SectionHeader title={t('home.profile.title')} />
+          <HomeListeningProfile stats={stats} />
         </div>
 
         <div className="home-panel home-favorite-album-panel" data-empty={(stats?.topAlbums?.length ?? 0) === 0}>
@@ -2872,6 +2639,8 @@ export const HomePage = (): JSX.Element => {
           <FavoriteAlbumGrid albums={stats?.topAlbums ?? []} onOpenAlbum={openFavoriteAlbum} />
         </div>
       </section>
+
+      <HomeDiscovery onOpenAlbum={openRecommendedAlbum} />
 
       {error || isLoading ? (
         <p className="home-status-line" role={error ? 'alert' : 'status'}>

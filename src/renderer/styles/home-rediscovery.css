@@ -1,0 +1,56 @@
+.home-rediscovery {
+  container-type: inline-size;
+}
+
+.home-rediscovery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.home-rediscovery-album {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-heading-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-rediscovery-album .home-artwork {
+  width: 100%;
+  height: auto;
+  max-width: 220px;
+  aspect-ratio: 1;
+  margin-bottom: 6px;
+}
+
+.home-rediscovery-album strong,
+.home-rediscovery-album span,
+.home-rediscovery-album small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-rediscovery-album strong { font-size: 16px; }
+.home-rediscovery-album span { color: var(--theme-muted-text); font-size: 13px; }
+.home-rediscovery-album small { color: var(--theme-subtle-text); font-size: 12px; }
+.home-rediscovery-album:focus-visible { outline: 2px solid var(--theme-focus-ring); outline-offset: 5px; }
+
+.home-page .home-continue-source {
+  color: var(--theme-muted-text);
+  font-size: 13px;
+}
+
+@container (max-width: 650px) {
+  .home-rediscovery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+}
+
+@media (max-width: 420px) {
+  .home-rediscovery-grid { gap: 12px; }
+}

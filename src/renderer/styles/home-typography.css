@@ -1,0 +1,170 @@
+/* Home type scale and rhythm: a large hero title, light numerals and hairlines,
+ * with no new frames or panel fills. Loads after the editorial Home layers.
+ */
+.home-page {
+  gap: 24px;
+  padding: 24px 24px 40px;
+}
+
+/* Hero */
+.home-page .home-now-card,
+.home-page .home-now-card[data-signal-enabled="false"] {
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 0 48px;
+  align-content: start;
+}
+
+.home-page .home-now-artwork-stack { align-self: start; }
+.home-page .home-hero-copy { gap: 0; align-self: stretch; }
+
+.home-page .home-hero h1 {
+  max-width: none;
+  margin-top: 4px;
+}
+
+.home-page .home-now-copy .home-now-meta { font-size: 15px; }
+.home-page .home-hero .home-continue-source { margin: 8px 0 0; }
+.home-page .home-hero-actions { padding-top: 22px; }
+.home-page .home-now-details { padding-top: 14px; }
+
+.home-page .home-now-audio-facts {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+}
+
+.home-page .home-intro-layout {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* Section headings, including the discovery and Steam blocks further down. */
+.home-page .home-section-header h2,
+.home-page .home-listening-sidebar .home-section-header h2,
+html .home-page .home-discovery .home-section-header h2,
+.home-page :is(.steam-listening-stats-heading, .steam-leaderboard-heading) h2 {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.home-page .steam-leaderboard-heading small {
+  color: var(--theme-muted-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.home-page .steam-leaderboard-emblem { display: none; }
+.home-page :is(.steam-leaderboard-opt-in, .steam-listening-stats-opt-in) { padding-inline: 0; }
+
+html .home-page .steam-leaderboard-actions button {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
+}
+
+html .home-page .steam-leaderboard-actions button:not(:disabled):hover {
+  color: var(--theme-heading-text);
+  background: var(--theme-button-bg-hover);
+}
+
+.home-page .home-listening-sidebar .home-section-header {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.home-page .home-panel { gap: 20px; }
+.home-page .home-cover-rail { gap: 24px; }
+
+.home-music-shelves,
+.home-listening-sidebar { gap: 52px; }
+
+@container home (min-width: 1101px) {
+  .home-discovery-layout { grid-template-columns: minmax(0, 1fr) 288px; gap: 64px; }
+}
+
+/* This week */
+.home-page .home-week-summary { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
+.home-page .home-listening-sidebar .home-week-stat {
+  align-items: baseline;
+  gap: 2px 4px;
+  min-height: 0;
+}
+.home-page .home-listening-sidebar .home-week-stat strong {
+  font-size: 28px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+.home-page .home-week-stat small { order: 1; font-size: 13px; font-weight: 400; }
+.home-page .home-week-stat span { order: 2; font-size: 12px; font-weight: 400; }
+
+.home-page .home-week-heatmap { --home-week-cell: 14px; }
+.home-page :is(.home-week-grid, .home-weekdays, .home-week-months) { gap: 4px; }
+.home-page :is(.home-week-cell, .home-week-legend i) { border-radius: 0; }
+
+/* Artist ranking */
+.home-page .home-listening-sidebar .home-artist-rank-row {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  min-height: 56px;
+}
+.home-page .home-listening-sidebar .home-artist-rank-number {
+  font-size: 22px;
+  font-weight: 300;
+  color: var(--theme-subtle-text);
+  text-align: left;
+}
+.home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] .home-artist-rank-number,
+.home-page .home-listening-sidebar .home-artist-rank-row:hover .home-artist-rank-number {
+  color: var(--theme-accent-text-strong);
+}
+.home-page .home-listening-sidebar .home-artist-rank-main strong { font-size: 14px; font-weight: 600; }
+.home-page .home-listening-sidebar .home-artist-rank-chip { font-size: 11px; }
+.home-page .home-listening-sidebar .home-artist-rank-meter { background: var(--theme-list-row-border); }
+.home-page .home-listening-sidebar .home-artist-rank-row[data-rank-lead="true"] .home-artist-rank-meter i {
+  background: var(--theme-accent-solid-bg);
+}
+
+/* Top tracks: one column of aligned rows. */
+.home-page .home-top-tracks { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.home-page .home-top-track-row {
+  grid-template-areas: "rank art copy meta";
+  grid-template-columns: 32px 64px minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 0;
+  gap: 16px;
+}
+.home-page :is(.home-top-track-art, .home-top-track-art .home-artwork) { width: 64px; height: 64px; }
+.home-page .home-top-track-rank { text-align: left; font-size: 13px; font-weight: 400; }
+.home-page .home-top-track-copy strong { font-size: 14px; font-weight: 600; }
+.home-page :is(.home-top-track-copy, .home-top-track-meta) { align-self: center; }
+.home-page .home-top-track-meta { display: flex; flex-wrap: nowrap; gap: 20px; align-items: baseline; }
+.home-page .home-top-track-meta :is(strong, small) { font-size: 13px; color: var(--theme-muted-text); }
+
+@container home (max-width: 1100px) {
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 240px minmax(0, 1fr); gap: 0 32px; }
+}
+
+@container home (max-width: 820px) {
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 192px minmax(0, 1fr); gap: 0 24px; }
+}
+
+@container home (max-width: 600px) {
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: 144px minmax(0, 1fr); gap: 0 20px; }
+  .home-page .home-top-track-meta small { display: none; }
+}
+
+@container home (max-width: 400px) {
+  .home-page .home-now-card,
+  .home-page .home-now-card[data-signal-enabled="false"] { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+}
+
+@media (max-width: 720px) {
+  .home-page { padding: 4px 0 24px; gap: 24px; }
+}

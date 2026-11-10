@@ -1,0 +1,121 @@
+.home-page-skeleton .home-skel-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.home-page-skeleton .home-skel-copy {
+  grid-area: copy;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.home-page-skeleton .home-skel-status {
+  margin: 0;
+  color: var(--theme-accent-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+}
+
+.home-page-skeleton .home-skel-title {
+  width: min(100%, 520px);
+  height: clamp(34px, 4.6cqi, 58px);
+}
+
+.home-page-skeleton .home-skel-meta {
+  width: min(100%, 240px);
+  height: 14px;
+}
+
+.home-page-skeleton .home-skel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.home-page-skeleton .home-skel-actions > span {
+  width: 84px;
+  height: 32px;
+}
+
+.home-page-skeleton .home-skel-actions > span:nth-child(2) {
+  width: 72px;
+}
+
+.home-page-skeleton .home-skel-actions > span:nth-child(3) {
+  width: 96px;
+}
+
+.home-page-skeleton .home-skel-count {
+  width: 72px;
+  height: 28px;
+}
+
+.home-page-skeleton .home-cover-skeleton:nth-child(3n) .home-skeleton-line {
+  width: 68%;
+}
+
+.home-page-skeleton .home-cover-skeleton:nth-child(3n + 1) .home-skeleton-line--short {
+  width: 40%;
+}
+
+.home-page-skeleton .home-skel-week-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-page-skeleton .home-skel-week-stats > span {
+  height: 44px;
+}
+
+.home-page-skeleton .home-skel-heatmap {
+  display: grid;
+  grid-template-columns: repeat(12, 12px);
+  grid-auto-rows: 12px;
+  gap: 3px;
+  max-width: 100%;
+}
+
+.home-page-skeleton .home-skel-heatmap i {
+  display: block;
+  background: var(--theme-panel-bg-muted);
+}
+
+.home-page-skeleton .home-skel-heatmap i:nth-child(5n) {
+  background: color-mix(in srgb, var(--theme-accent-bg) 70%, var(--theme-panel-bg-muted));
+}
+
+.home-page-skeleton .home-skel-rank {
+  display: grid;
+  gap: 16px;
+}
+
+.home-page-skeleton .home-skel-rank > span {
+  height: 14px;
+}
+
+.home-page-skeleton .home-skel-rank > span:nth-child(odd) {
+  width: 82%;
+}
+
+.home-page-skeleton .home-skel-rank > span:nth-child(even) {
+  width: 58%;
+}
+
+@container home (max-width: 680px) {
+  .home-page-skeleton .home-skel-heatmap {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page-skeleton .home-skeleton-block::after {
+    animation: none;
+  }
+}

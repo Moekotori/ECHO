@@ -1,0 +1,122 @@
+.home-page .home-discovery-shortcuts { gap: 0; }
+
+.home-discovery-shortcut-editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.home-shortcut-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.home-discovery-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--theme-field-border);
+  border-radius: 6px;
+  background: var(--theme-field-bg);
+  color: var(--theme-muted-text);
+}
+
+.home-discovery-search:focus-within {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
+.home-discovery-search > svg,
+.home-shortcut-selection-count > svg {
+  flex-shrink: 0;
+}
+
+.home-discovery-search input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-page-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.home-discovery .home-discovery-search input:focus-visible { outline: none; }
+.home-discovery-search input::placeholder { color: var(--theme-field-placeholder); }
+.home-discovery-search input::-webkit-search-cancel-button { appearance: none; }
+.home-discovery-search .echo-search-tools { display: flex; }
+
+.home-discovery-search .echo-search-clear {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--theme-muted-text);
+}
+
+.home-discovery-search .echo-search-clear:hover { background: var(--theme-control-bg-hover); }
+
+.home-shortcut-selection-count {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 7px;
+  color: var(--theme-muted-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-discovery-pin-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.home-discovery-pin-options > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--theme-list-row-bg);
+  color: var(--theme-page-text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.home-discovery-pin-options > button:not(:disabled):hover { background: var(--theme-list-row-bg-hover); }
+.home-discovery-pin-options > button[aria-pressed="true"] { background: var(--theme-list-row-bg-active); }
+.home-discovery-pin-options .home-artwork { width: 40px; height: 40px; }
+
+.home-shortcut-option-copy { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.home-shortcut-option-copy :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-shortcut-option-copy strong { font-size: 13px; font-weight: 600; }
+.home-discovery .home-shortcut-option-copy small { font-size: 11px; }
+.home-shortcut-option-state { flex-shrink: 0; color: var(--theme-muted-text); }
+.home-discovery-pin-options > button[aria-pressed="true"] .home-shortcut-option-state { color: var(--theme-accent-text); }
+
+@container home (max-width: 820px) {
+  .home-discovery-pin-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container home (max-width: 540px) {
+  .home-discovery-pin-options { grid-template-columns: minmax(0, 1fr); }
+  .home-shortcut-editor-toolbar { gap: 10px; }
+}

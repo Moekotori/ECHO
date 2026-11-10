@@ -15,7 +15,7 @@ import type * as I18nProviderModule from '../i18n/I18nProvider';
 import { albumDetailNavigationEvent } from '../utils/albumNavigation';
 import { artistDetailNavigationEvent } from '../utils/artistNavigation';
 import { translations, isLocale, localeOptions } from '../i18n/locales.testing';
-import { HomePage, defaultHomeHeroTitle, homeHeroTitleOptions, resetHomePageCacheForTest } from './HomePage';
+import { HomePage, homeHeroTitleOptions, resetHomePageCacheForTest } from './HomePage';
 
 const queueState = vi.hoisted(() => ({
   value: {
@@ -42,6 +42,8 @@ vi.mock('../stores/PlaybackQueueProvider', () => ({
 
 vi.mock('../stores/playbackStatusStore', () => ({
   useSharedPlaybackStatus: () => sharedPlaybackState.value,
+  useThrottledSharedPlaybackStatus: () => sharedPlaybackState.value,
+  useSharedPlaybackActivityState: () => sharedPlaybackState.value.audioStatus?.state ?? 'idle',
 }));
 
 vi.mock('../i18n/I18nProvider', async () => {
@@ -203,7 +205,7 @@ const stats = (overrides: Partial<PlaybackStatsDashboard> = {}): PlaybackStatsDa
       trackCount: 8,
       duration: 1600,
       coverId: 'favorite-cover-1',
-      coverThumb: 'echo-cover://album/favorite-cover-1',
+      coverThumb: 'echo-cover://large/favorite-cover-1',
       playCount: 9,
       completedCount: 8,
       playedSeconds: 1440,
@@ -441,23 +443,22 @@ describe('HomePage', () => {
     expect(screen.getAllByRole('tab')[0]?.getAttribute('aria-selected')).toBe('false');
     expect(screen.getByText('本周回声')).toBeTruthy();
     expect(document.querySelectorAll('.home-recent-panel .home-cover-card')).toHaveLength(4);
-    expect(document.querySelector('.home-recent-panel .home-cover-card img')?.getAttribute('src')).toBe('echo-cover://large/daily-cover-1');
+    expect(document.querySelector('.home-recent-panel .home-cover-card img')?.getAttribute('src')).toBe('echo-cover://album/daily-cover-1');
     expect(document.querySelectorAll('.home-recommend-panel .home-cover-card')).toHaveLength(7);
-    expect(document.querySelector('.home-recommend-panel .home-cover-card img')?.getAttribute('src')).toMatch(/^echo-cover:\/\/large\/daily-cover-/);
+    expect(document.querySelector('.home-recommend-panel .home-cover-card img')?.getAttribute('src')).toMatch(/^echo-cover:\/\/album\/daily-cover-/);
     expect(document.querySelectorAll('.home-favorite-album-panel .home-favorite-album-card')).toHaveLength(4);
     expect(document.querySelector('.home-favorite-album-panel .home-favorite-album-card img')?.getAttribute('src')).toBe('echo-cover://large/favorite-cover-1');
     expect(within(document.querySelector('.home-favorite-album-panel') as HTMLElement).queryByText('Favorite Album Five')).toBeNull();
     expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
-    const contentGrid = document.querySelector('.home-content-grid');
-    const recommendPanel = document.querySelector('.home-recommend-panel');
-    expect(contentGrid && recommendPanel ? contentGrid.compareDocumentPosition(recommendPanel) & Node.DOCUMENT_POSITION_FOLLOWING : 0).toBeTruthy();
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'default', excludeOsuAlbums: true });
+    expect(document.querySelector('.home-music-shelves .home-recommend-panel')).toBeTruthy();
+    expect(document.querySelector('.home-listening-sidebar .home-week-panel')).toBeTruthy();
     expect(within(document.querySelector('.home-recent-panel') as HTMLElement).queryByText('Daily Album Five')).toBeNull();
     fireEvent.click(screen.getAllByRole('tab')[0]);
     expect(screen.getAllByRole('tab')[0]?.getAttribute('aria-selected')).toBe('true');
     expect(await screen.findByRole('button', { name: /Night Album/ })).toBeTruthy();
     expect(document.querySelectorAll('.home-recent-panel .home-cover-card')).toHaveLength(4);
-    expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://large/played-album-cover');
+    expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://album/played-album-cover');
     expect(library.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
     expect(library.getPlaybackHistory).toHaveBeenCalledWith({ page: 1, pageSize: 12, sort: 'recent' });
   });
@@ -498,7 +499,7 @@ describe('HomePage', () => {
     sharedPlaybackState.value.audioStatus = { state: 'loading' } as AudioStatus;
     const view = render(<HomePage />);
 
-    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('12'));
+    await waitFor(() => expect(within(screen.getByRole('button', { name: '打开歌曲' })).getByText(/^\d+$/).textContent).toBe('12'));
     expect(library.getAlbums).not.toHaveBeenCalled();
     sharedPlaybackState.value.audioStatus = { state: 'playing' } as AudioStatus;
     view.rerender(<HomePage />);
@@ -515,7 +516,7 @@ describe('HomePage', () => {
 
     await waitForRecentPanelReady();
     await waitFor(() => expect(library.getPlaybackStatsDashboard).toHaveBeenCalled());
-    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('12'));
+    await waitFor(() => expect(within(screen.getByRole('button', { name: '打开歌曲' })).getByText(/^\d+$/).textContent).toBe('12'));
     vi.mocked(library.getSummary).mockClear();
     vi.mocked(library.getAlbums).mockClear();
     vi.mocked(library.getPlaybackHistory).mockClear();
@@ -525,7 +526,7 @@ describe('HomePage', () => {
     window.dispatchEvent(new Event('library:changed'));
 
     expect(await within(document.querySelector('.home-recent-panel') as HTMLElement).findByRole('button', { name: /Added During Playback/ })).toBeTruthy();
-    await waitFor(() => expect(document.querySelector('.home-metric-tile strong')?.textContent).toBe('37'));
+    await waitFor(() => expect(within(screen.getByRole('button', { name: '打开歌曲' })).getByText(/^\d+$/).textContent).toBe('37'));
     expect(library.getSummary).toHaveBeenCalledTimes(1);
     expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
     expect(library.getPlaybackHistory).not.toHaveBeenCalled();
@@ -555,7 +556,7 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitForRecentPanelReady();
-    expect(screen.getByText('Today Echo')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Today Echo' })).toBeTruthy();
     expect(screen.getByText('Weekly Echo')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'View queue' })).toBeTruthy();
   });
@@ -614,7 +615,7 @@ describe('HomePage', () => {
     expect(randomSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the fixed home title when random hero titles are disabled', async () => {
+  it('uses the featured track title when random hero titles are disabled', async () => {
     installLibraryMock();
     installAppSettingsMock({ homeRandomHeroTitleEnabled: false });
     vi.spyOn(Math, 'random').mockReturnValue(0.62);
@@ -622,7 +623,7 @@ describe('HomePage', () => {
     render(<HomePage />);
 
     await waitForRecentPanelReady();
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(defaultHomeHeroTitle));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Breeze'));
   });
 
   it('updates the home hero title when the random setting changes', async () => {
@@ -638,7 +639,7 @@ describe('HomePage', () => {
 
     window.dispatchEvent(new CustomEvent('settings:changed', { detail: { homeRandomHeroTitleEnabled: false } }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(defaultHomeHeroTitle));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Breeze'));
 
     window.dispatchEvent(new CustomEvent('settings:changed', { detail: { homeRandomHeroTitleEnabled: true } }));
 
@@ -748,7 +749,7 @@ describe('HomePage', () => {
     expect(library.getSummary).toHaveBeenCalled();
     expect(library.getTracks).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
     expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'default', excludeOsuAlbums: true });
   });
 
   it('manually refreshes the lightweight home library snapshot from an empty page', async () => {
@@ -794,7 +795,7 @@ describe('HomePage', () => {
     expect(getSummary).toHaveBeenCalledTimes(1);
     expect(getTracks).toHaveBeenLastCalledWith({ page: 1, pageSize: 8, sort: 'recent' });
     expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'recent', excludeOsuAlbums: true });
-    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'default', excludeOsuAlbums: true });
+    expect(getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'default', excludeOsuAlbums: true });
     expect(getPlaybackHistory).toHaveBeenCalledTimes(playbackHistoryCallsBeforeRefresh);
     expect(getPlaybackHistorySummary).toHaveBeenCalledTimes(playbackHistorySummaryCallsBeforeRefresh);
     expect(getPlaybackStatsDashboard).toHaveBeenCalledTimes(playbackStatsDashboardCallsBeforeRefresh);
@@ -885,7 +886,7 @@ describe('HomePage', () => {
     fireEvent.click(recommendPanel.querySelector('.home-section-header button') as HTMLButtonElement);
 
     expect(await within(recommendPanel).findByRole('button', { name: /Random Recommendation/ })).toBeTruthy();
-    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 7, sort: 'random', excludeOsuAlbums: true });
+    expect(library.getAlbums).toHaveBeenCalledWith({ page: 1, pageSize: 8, sort: 'random', excludeOsuAlbums: true });
     expect(library.getSummary).not.toHaveBeenCalled();
     expect(library.getTracks).not.toHaveBeenCalled();
     expect(library.getPlaybackHistory).not.toHaveBeenCalled();
@@ -902,16 +903,15 @@ describe('HomePage', () => {
       render(<HomePage />);
 
       await waitForRecentPanelReady();
-      const clickMetric = (index: number): string | undefined => {
-        const buttons = document.querySelectorAll<HTMLButtonElement>('.home-metric-tile');
-        fireEvent.click(buttons[index]);
+      const clickMetric = (label: string): string | undefined => {
+        fireEvent.click(screen.getByRole('button', { name: label }));
         return (navigate.mock.calls.at(-1)?.[0] as CustomEvent<string> | undefined)?.detail;
       };
 
-      expect(clickMetric(0)).toBe('songs');
-      expect(clickMetric(1)).toBe('albums');
-      expect(clickMetric(2)).toBe('artists');
-      expect(clickMetric(3)).toBe('folders');
+      expect(clickMetric('打开歌曲')).toBe('songs');
+      expect(clickMetric('打开专辑')).toBe('albums');
+      expect(clickMetric('打开艺术家')).toBe('artists');
+      expect(clickMetric('打开文件夹')).toBe('folders');
     } finally {
       window.removeEventListener('app:navigate:route', navigate);
     }
@@ -1951,7 +1951,7 @@ describe('HomePage', () => {
     window.dispatchEvent(new Event('playback-history:changed'));
 
     expect(await screen.findByRole('button', { name: /Fresh Played Album/ })).toBeTruthy();
-    expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://large/fresh-played-cover');
+    expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://album/fresh-played-cover');
     await waitFor(() => expect(document.querySelector('.home-week-panel')?.textContent).toContain('42'));
     expect(library.getPlaybackHistory).toHaveBeenCalledWith({ page: 1, pageSize: 12, sort: 'recent' });
     expect(library.getPlaybackHistorySummary).toHaveBeenCalledWith(expect.objectContaining({
@@ -2147,7 +2147,7 @@ describe('HomePage', () => {
     fireEvent.click(screen.getAllByRole('tab')[0]);
 
     await waitFor(() =>
-      expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://large/current-played-cover'),
+      expect(document.querySelector('.home-recent-panel .home-played-rail img')?.getAttribute('src')).toBe('echo-cover://album/current-played-cover'),
     );
     expect(within(document.querySelector('.home-played-rail') as HTMLElement).getByRole('button', { name: /Current Played Album/ })).toBeTruthy();
     expect(library.getAlbumForTrack).toHaveBeenCalledWith('current-played');
