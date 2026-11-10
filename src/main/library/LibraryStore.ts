@@ -6466,7 +6466,7 @@ export class LibraryStore {
     const pageParams = [...baseParams, ...(searchQuery && !showDuplicatesOnly ? [searchQuery] : []), ...remoteFilters.params];
     const sorts = query?.sorts?.length ? query.sorts.slice(0, 32) : [sort as LibrarySort];
     const includePlaybackStats = sorts.some((value) => ['lastPlayed', 'playCountAsc', 'playCountDesc', 'frequent'].includes(value));
-    const buildUnifiedTracksSql = (withPlaybackStats: boolean, mode: 'candidates' | 'hydrate'): string => {
+    const buildUnifiedTracksSql = (withPlaybackStats: boolean, mode: 'candidates' | 'rank' | 'hydrate'): string => {
       const playbackStatsCtes = withPlaybackStats
         ? `local_playback_stats AS (
       SELECT
@@ -6499,10 +6499,10 @@ export class LibraryStore {
          AND remote_playback_stats.stable_key = remote_tracks.stable_key`
         : '';
 
-      const projection = (media: 'local' | 'remote', full: string): string => mode === 'candidates'
+      const projection = (media: 'local' | 'remote', full: string): string => mode !== 'hydrate'
         ? trackSortProjection(sorts, Boolean(searchQuery) && (media === 'local' || !showDuplicatesOnly), media, withPlaybackStats)
         : full;
-      return `WITH ${playbackStatsCtes} library_tracks AS NOT MATERIALIZED (
+      return `WITH ${playbackStatsCtes} library_tracks AS ${mode === 'rank' ? 'MATERIALIZED' : 'NOT MATERIALIZED'} (
       SELECT
       ${projection('local', `tracks.id,
         'local' AS media_type,
@@ -6597,6 +6597,35 @@ export class LibraryStore {
       (SELECT COUNT(*) FROM tracks ${searchJoinSql} ${whereSql}) +
       (SELECT COUNT(*) FROM remote_tracks INNER JOIN remote_sources ON remote_sources.id = remote_tracks.source_id ${remoteSearchJoinSql} ${remoteWhereSql})
     ) AS total`, pageParams);
+
+    if (query?.locateTrackId) {
+      // Materialize the sort projection before ranking so FTS relevance is computed in its own query.
+      const locatedRows = this.allRows(
+        `${buildUnifiedTracksSql(includePlaybackStats, 'rank')},
+      ranked_tracks AS MATERIALIZED (
+        SELECT *, ROW_NUMBER() OVER (${orderSql}) - 1 AS list_index FROM library_tracks
+      ), target_page AS (
+        SELECT CAST(list_index / ? AS INTEGER) AS page_index FROM ranked_tracks WHERE id = ? LIMIT 1
+      ), selected_tracks AS MATERIALIZED (
+        SELECT ranked_tracks.* FROM ranked_tracks, target_page WHERE CAST(list_index / ? AS INTEGER) = page_index
+      ), hydrated_tracks AS (
+        ${buildUnifiedTracksSql(false, 'hydrate')} SELECT * FROM library_tracks
+      )
+      SELECT hydrated_tracks.*, selected_tracks.list_index FROM hydrated_tracks
+      INNER JOIN selected_tracks USING (id, media_type) ORDER BY selected_tracks.list_index`,
+        ...pageParams, pageSize, query.locateTrackId, pageSize,
+      );
+      const locatedPage = locatedRows.length > 0 ? Math.floor(Number(locatedRows[0]!.list_index) / pageSize) + 1 : 1;
+      this.lastTracksQueryMs = performance.now() - startedAt;
+      return {
+        items: locatedRows.map((row) => this.mapTrack(row)),
+        page: locatedPage,
+        pageSize,
+        total,
+        hasMore: locatedRows.length > 0 && locatedPage * pageSize < total,
+      };
+    }
+
     const rows =
       randomWindow && sorts[0] === 'random'
         ? (() => {

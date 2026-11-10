@@ -1,0 +1,31 @@
+.first-run-community-links {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.first-run-community-links button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--theme-button-border);
+  border-radius: 8px;
+  background: var(--theme-button-bg);
+  color: var(--theme-page-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.first-run-community-links button:hover {
+  background: var(--theme-button-bg-hover);
+}
+
+.first-run-community-links button:focus-visible {
+  outline: 2px solid var(--theme-accent-solid-bg);
+  outline-offset: 2px;
+}

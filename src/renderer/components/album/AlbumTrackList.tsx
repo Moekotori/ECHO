@@ -19,7 +19,6 @@ type AlbumTrackListProps = {
   reloadToken?: number;
   summary?: {
     duration: string;
-    signal: string;
     totalLabel: string;
   };
 };
@@ -220,9 +219,8 @@ export const AlbumTrackList = ({
         <div className="album-track-summary" aria-label={t('albumDetail.tracks.summaryAria')}>
           <span>{summary?.totalLabel ?? (tracks.length === total ? t('albumDetail.count.tracks', { count: total }) : t('albumDetail.count.loadedTracks', { loaded: tracks.length, total }))}</span>
           <span>{summary?.duration ?? t('albumDetail.status.unknownLength')}</span>
-          <span>{summary?.signal ?? t('albumDetail.status.readingSignal')}</span>
         </div>
-        <span>{tracks.length === total ? t('albumDetail.count.tracks', { count: total }) : t('albumDetail.count.loadedTracks', { loaded: tracks.length, total })}</span>
+        {summary && tracks.length < total ? <span>{t('albumDetail.count.loadedTracks', { loaded: tracks.length, total })}</span> : null}
       </div>
 
       <div className="album-track-list" role="list">

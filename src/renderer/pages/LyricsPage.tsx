@@ -1,5 +1,7 @@
 import { Component, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "../styles/lyrics.css";
+import "../styles/lyrics-afterglow-cover.css";
+import "../styles/lyrics-folded.css";
 import type { CSSProperties, DragEvent, MouseEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
 import {
   ArrowLeft,
@@ -11,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { AudioStatus } from "../../shared/types/audio";
-import type { AppSettings } from "../../shared/types/appSettings";
+import { defaultLyricsPageStyle, type AppSettings } from "../../shared/types/appSettings";
 import { resolveEffectivePerformancePolicy } from "../../shared/utils/performancePolicy";
 import type { AirPlayReceiverStatus, ConnectSessionStatus } from "../../shared/types/connect";
 import type { DiagnosticMemoryPressureEvent } from "../../shared/types/diagnostics";
@@ -32,6 +34,9 @@ import type {
 } from "../../shared/types/streaming";
 import { neteaseDjRadioPlaylistPrefix, streamingProviderNames } from "../../shared/types/streaming";
 import type { PlaybackStatus } from "../../shared/types/playback";
+import { AfterglowCoverArtwork } from "../components/lyrics/afterglow-cover/AfterglowCoverArtwork";
+import { createAfterglowCoverPalette } from "../components/lyrics/afterglow-cover/afterglowCoverPalette";
+import { resolveAfterglowNextAlbumCover } from "../components/lyrics/afterglow-cover/afterglowNextAlbumCover";
 import { readCustomLyricsFile } from "../components/lyrics/readCustomLyricsFile";
 import { customLyricsFileAccept, customLyricsFilePrompt, isCustomLyricsFile, firstCustomLyricsFile, hasFileDrag, maxCustomLyricsFileBytes } from "../components/lyrics/customLyricsFile";
 import { useLyricsTrackSwipe } from "../components/lyrics/useLyricsTrackSwipe";
@@ -286,7 +291,7 @@ const fallbackLyricsDisplaySettings: LyricsDisplaySettings = {
   lyricsContextOpacityPercent: 49,
   lyricsCoverOpacityPercent: 100,
   lyricsSmartReadableColorsEnabled: false,
-  lyricsPageStyle: "default",
+  lyricsPageStyle: defaultLyricsPageStyle,
   lyricsImmersiveCoverStyleEnabled: false,
   lyricsImmersiveCoverGlassEnabled: false,
   lyricsImmersiveCoverGlassBlurPx: 16,
@@ -2048,7 +2053,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
     useState<LyricsViewMode>(() => readRememberedLyricsViewMode());
   const [lyricsReadabilityEnhanced, setLyricsReadabilityEnhanced] = useState(false);
   const [mvHideLyrics, setMvHideLyrics] = useState(false);
-  const [imageReadableSample, setImageReadableSample] = useState<ReadableColorSample | null>(null);
+  const [sampledImage, setSampledImage] = useState<{ key: string; sample: ReadableColorSample } | null>(null);
   const [mvReadableSample, setMvReadableSample] = useState<ReadableColorSample | null>(null);
   const [documentThemeMode, setDocumentThemeMode] = useState<"light" | "dark">(getCurrentDocumentThemeMode);
   const [networkBackgroundCoverUrl, setNetworkBackgroundCoverUrl] = useState<string | null>(null);
@@ -2699,23 +2704,47 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
   );
   const activeLyricsPageStyle =
     !lyricsRenderPressureReduced &&
-    lyricsViewMode === "lyrics" &&
-    (lyricsDisplaySettings.lyricsPageStyle === "editorial" ||
-      lyricsDisplaySettings.lyricsPageStyle === "roseVinyl")
-      ? lyricsDisplaySettings.lyricsPageStyle
+    lyricsViewMode === "lyrics"
+      ? lyricsDisplaySettings.lyricsPageStyle ?? defaultLyricsPageStyle
       : "default";
+  const shouldUseAfterglowCoverStyle = activeLyricsPageStyle === "afterglowCover";
   const shouldUseEditorialStyle = activeLyricsPageStyle === "editorial";
+  const shouldUseFoldedStyle = activeLyricsPageStyle === "folded";
+  const afterglowNextAlbumCoverUrl = useMemo(
+    () => isActive && shouldUseAfterglowCoverStyle && headerCoverUrl &&
+      isCurrentNeteaseDjRadioTrack === false && queue.currentTrackId === currentTrack?.id
+      ? resolveAfterglowNextAlbumCover({
+          currentTrack,
+          currentQueueId: queue.currentQueueId,
+          currentCoverUrl: headerCoverUrl,
+          items: queue.items,
+          upcomingItem: queue.upcomingItem,
+          isShuffleEnabled: queue.isShuffleEnabled,
+          repeatMode: queue.repeatMode,
+          coverUrlForTrack: safeDisplayCoverUrl,
+        })
+      : null,
+    [
+      currentTrack, headerCoverUrl, isActive, isCurrentNeteaseDjRadioTrack, queue.currentQueueId,
+      queue.currentTrackId, queue.isShuffleEnabled, queue.items, queue.repeatMode,
+      queue.upcomingItem, shouldUseAfterglowCoverStyle,
+    ],
+  );
   const shouldUseRoseVinylStyle = activeLyricsPageStyle === "roseVinyl";
   const shouldUseImmersiveCoverStyle =
     !lyricsRenderPressureReduced &&
-    activeLyricsPageStyle !== "roseVinyl" &&
+    !shouldUseAfterglowCoverStyle &&
+    !shouldUseFoldedStyle &&
+    !shouldUseRoseVinylStyle &&
     lyricsDisplaySettings.lyricsImmersiveCoverStyleEnabled === true &&
     lyricsViewMode === "lyrics";
-  const requestedLyricsBackgroundMode = shouldUseImmersiveCoverStyle || shouldUseRoseVinylStyle
-      ? "cover"
-      : shouldUseEditorialStyle
-        ? "theme"
-        : lyricsDisplaySettings.lyricsBackgroundMode;
+  const shouldUseCoverBackdrop = shouldUseImmersiveCoverStyle || shouldUseRoseVinylStyle ||
+    (shouldUseFoldedStyle && lyricsDisplaySettings.lyricsBackgroundMode === "theme");
+  const requestedLyricsBackgroundMode = shouldUseCoverBackdrop
+    ? "cover"
+    : shouldUseEditorialStyle
+      ? "theme"
+      : lyricsDisplaySettings.lyricsBackgroundMode;
   const shouldRequestNetworkBackgroundCover =
     !lyricsRenderPressureReduced &&
     lyricsDisplaySettings.lyricsHighResolutionNetworkCoverEnabled === true &&
@@ -2823,7 +2852,8 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
     [trackTransition?.previousBackgroundCoverUrl],
   );
   const lyricsSmartReadableEnabled =
-    shouldUseImmersiveCoverStyle || shouldUseRoseVinylStyle || lyricsDisplaySettings.lyricsSmartReadableColorsEnabled === true;
+    !shouldUseAfterglowCoverStyle && !shouldUseFoldedStyle &&
+    (shouldUseImmersiveCoverStyle || shouldUseRoseVinylStyle || lyricsDisplaySettings.lyricsSmartReadableColorsEnabled === true);
   const lyricsUsesManualColor =
     lyricsDisplaySettings.lyricsColor.toUpperCase() !== fallbackLyricsDisplaySettings.lyricsColor.toUpperCase();
   const shouldEnhanceLyricsReadability = lyricsReadabilityEnhanced || lyricsSmartReadableEnabled;
@@ -2856,10 +2886,17 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
     ],
   );
   const lyricsCoverColorImageUrls = effectiveLyricsBackgroundMode === "coverColor" ? coverColorSampleUrls : emptyLyricsImageUrls;
-  const lyricsSampleImageUrls = lyricsSmartReadableImageUrls.length > 0
-    ? lyricsSmartReadableImageUrls
-    : lyricsCoverColorImageUrls;
+  const lyricsSampleImageUrls = shouldUseAfterglowCoverStyle
+    ? coverColorSampleUrls
+    : lyricsSmartReadableImageUrls.length > 0
+      ? lyricsSmartReadableImageUrls
+      : lyricsCoverColorImageUrls;
   const lyricsSampleImageKey = lyricsSampleImageUrls.join("\u0000");
+  const imageReadableSample = sampledImage?.key === lyricsSampleImageKey ? sampledImage.sample : null;
+  const afterglowCoverPalette = useMemo(
+    () => shouldUseAfterglowCoverStyle ? createAfterglowCoverPalette(imageReadableSample) : null,
+    [imageReadableSample, shouldUseAfterglowCoverStyle],
+  );
   const coverColorCssVars = useMemo<CoverColorCssVars | null>(
     () =>
       effectiveLyricsBackgroundMode === "coverColor"
@@ -2954,10 +2991,12 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
         "--lyrics-background-scale": (effectiveLyricsBackgroundScalePercent / 100).toFixed(2),
         "--lyrics-background-bleed": `-${lyricsDisplaySettings.lyricsCoverBlurPx * 2}px`,
         ...(coverColorCssVars ?? {}),
+        ...(afterglowCoverPalette ?? {}),
         ...(smartReadableColors ?? {}),
         ...(shouldUseMusicReactiveVisuals ? musicReactiveCssVars : {}),
       }) as CSSProperties,
     [
+      afterglowCoverPalette,
       coverColorCssVars,
       effectiveLyricsBackgroundMode,
       lyricsBackgroundCoverUrl,
@@ -3050,18 +3089,17 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
   ]);
 
   useEffect(() => {
+    setSampledImage(null);
     if (!lyricsSampleImageKey) {
-      setImageReadableSample(null);
       return undefined;
     }
 
     let disposed = false;
     const sampleImageUrls = lyricsSampleImageKey.split("\u0000");
-    setImageReadableSample(null);
     const cancelSampling = scheduleLyricsImageSampling(() => {
       void sampleFirstImageUrl(sampleImageUrls).then((sample) => {
-        if (!disposed) {
-          setImageReadableSample(sample);
+        if (!disposed && sample) {
+          setSampledImage({ key: lyricsSampleImageKey, sample });
         }
       });
     });
@@ -5791,6 +5829,14 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
           />
         ) : null}
       </div>
+      {shouldUseAfterglowCoverStyle ? (
+        <AfterglowCoverArtwork
+          artworkUrl={headerCoverUrl}
+          nextArtworkUrl={afterglowNextAlbumCoverUrl}
+          isActive={isActive}
+          animateTransitions={window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches !== true}
+        />
+      ) : null}
       {shouldUseMusicReactiveVisuals ? (
         <div className="lyrics-music-reactive-layer" aria-hidden="true">
           <div className="lyrics-music-reactive-wash" />
@@ -5845,7 +5891,9 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
       ) : null}
       {usePlayerDrawerHeader &&
       !lyricsDisplaySettings.lyricsHeaderHidden &&
+      !shouldUseAfterglowCoverStyle &&
       !shouldUseEditorialStyle &&
+      !shouldUseFoldedStyle &&
       !shouldUseRoseVinylStyle ? (
         <header className="lyrics-track-header lyrics-track-header-floating">
           <div
@@ -5962,6 +6010,7 @@ export const LyricsPage = ({ initialLyrics, isActive = true, usePlayerDrawerHead
             playbackState={isActive && seekPreviewSeconds === null ? mvAudioClock.state : "paused"}
             positionUpdatedAtMs={seekPreviewSeconds === null ? mvAudioClock.updatedAtMs : performance.now()}
             wordHighlightEnabled={lyricsDisplaySettings.lyricsWordHighlightEnabled !== false && !lyricsRenderPressureReduced}
+            wordHighlightProgressMode={shouldUseFoldedStyle ? "discrete" : "continuous"}
             highFrequencyUpdatesEnabled={isActive && !lyricsRenderPressureReduced}
             textDirection="horizontal"
             showRomanization={isLyricsDisplaySettingsReady && lyricsDisplaySettings.lyricsRomanizationEnabled}

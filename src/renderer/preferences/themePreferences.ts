@@ -571,7 +571,7 @@ const clearCustomThemeProperties = (root: HTMLElement): void => {
   }
 };
 
-const applyThemeToneOverride = (root: HTMLElement, tone: EffectiveTheme, override: AppThemeToneOverride): void => {
+export const applyThemeToneOverride = (root: HTMLElement, tone: EffectiveTheme, override: AppThemeToneOverride): void => {
   const fallback = fallbackToneDefaults[tone];
   const readColor = (key: keyof AppThemeToneOverride, property: string, fallbackValue: string): string => {
     const cssValue = readCssVariable(root, property) || fallbackValue;

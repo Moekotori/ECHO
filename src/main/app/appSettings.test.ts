@@ -75,11 +75,13 @@ describe('app settings normalization', () => {
     expect(normalizeSettings({ autoUpdateCustomUrl: 'file:///C:/updates' }).autoUpdateCustomUrl).toBeNull();
   });
 
-  it('preserves the editorial lyrics page style', async () => {
+  it('defaults lyrics page style to Afterlight and preserves saved styles', async () => {
     const { normalizeSettings } = await import('./appSettings');
 
-    expect(normalizeSettings({ lyricsPageStyle: 'editorial' }).lyricsPageStyle).toBe('editorial');
-    expect(normalizeSettings({ lyricsPageStyle: 'unsupported' }).lyricsPageStyle).toBe('default');
+    for (const style of ['default', 'afterglowCover', 'editorial', 'folded', 'roseVinyl'] as const) {
+      expect(normalizeSettings({ lyricsPageStyle: style }).lyricsPageStyle).toBe(style);
+    }
+    expect(normalizeSettings({ lyricsPageStyle: 'unsupported' }).lyricsPageStyle).toBe('afterglowCover');
   });
 
   it('normalizes accessibility preferences and rejects unsupported UI scales', async () => {
@@ -251,7 +253,7 @@ describe('app settings normalization', () => {
     expect(settings.lyricsContextOpacityPercent).toBe(49);
     expect(settings.lyricsColor).toBe('#314054');
     expect(settings.lyricsSmartReadableColorsEnabled).toBe(false);
-    expect(settings.lyricsPageStyle).toBe('default');
+    expect(settings.lyricsPageStyle).toBe('afterglowCover');
     expect(settings.lyricsImmersiveCoverStyleEnabled).toBe(false);
     expect(settings.lyricsImmersiveCoverGlassEnabled).toBe(false);
     expect(settings.lyricsImmersiveCoverGlassBlurPx).toBe(16);
@@ -2015,7 +2017,7 @@ describe('app settings normalization', () => {
       lyricsContextOpacityPercent: 100,
       lyricsColor: '#314054',
       lyricsSmartReadableColorsEnabled: false,
-      lyricsPageStyle: 'default',
+      lyricsPageStyle: 'afterglowCover',
       lyricsImmersiveCoverStyleEnabled: false,
       lyricsImmersiveCoverGlassEnabled: false,
       lyricsImmersiveCoverGlassBlurPx: 32,

@@ -2,6 +2,7 @@ import { Suspense, cloneElement, isValidElement, lazy, startTransition, useCallb
 import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { PlayerBar } from '../components/player/PlayerBar';
+import { createAfterglowCoverMiniPlayerPalette } from '../components/lyrics/afterglow-cover/afterglowCoverMiniPlayerPalette';
 import { contrastRatio, parseHexColor, sampleImageUrl, type ReadableColorSample, type Rgb } from '../components/lyrics/lyricsReadableColor';
 import { DragDropImportOverlay } from '../components/import/DragDropImportOverlay';
 import { PluginTrackActionDrawerHost } from '../components/library/PluginTrackActionDrawer';
@@ -32,7 +33,7 @@ import {
   type AudioSdmTargetRate,
   type AudioStatus,
 } from '../../shared/types/audio';
-import { type AppSettings, type AppThemeMode } from '../../shared/types/appSettings';
+import { defaultLyricsPageStyle, type AppSettings, type AppThemeMode } from '../../shared/types/appSettings';
 import { resolveEffectivePerformancePolicy } from '../../shared/utils/performancePolicy';
 import type { DiagnosticMemoryPressureEvent } from '../../shared/types/diagnostics';
 import type { DownloadJob } from '../../shared/types/downloads';
@@ -258,6 +259,8 @@ type AppWallpaperSettings = Pick<
 
 type LyricsMiniPlayerSettings = Pick<
   AppSettings,
+  | 'lyricsPageStyle'
+  | 'lowLoadPlaybackModeEnabled'
   | 'lyricsPlayerBarDrawerEnabled'
   | 'lyricsPlayerBarDrawerAutoEnableForMv'
   | 'lyricsPlayerBarDrawerAutoHideEnabled'
@@ -295,6 +298,7 @@ const defaultAppWallpaperSettings: AppWallpaperSettings = {
 };
 
 const defaultLyricsMiniPlayerSettings: LyricsMiniPlayerSettings = {
+  lyricsPageStyle: defaultLyricsPageStyle,
   lyricsPlayerBarDrawerEnabled: true,
   lyricsPlayerBarDrawerAutoEnableForMv: true,
   lyricsPlayerBarDrawerAutoHideEnabled: true,
@@ -386,6 +390,8 @@ const selectAppWallpaperSettings = (settings: AppSettings): AppWallpaperSettings
 });
 
 const selectLyricsMiniPlayerSettings = (settings: Partial<AppSettings>): LyricsMiniPlayerSettings => ({
+  lyricsPageStyle: settings.lyricsPageStyle ?? defaultLyricsPageStyle,
+  lowLoadPlaybackModeEnabled: settings.lowLoadPlaybackModeEnabled,
   lyricsPlayerBarDrawerEnabled: settings.lyricsPlayerBarDrawerEnabled !== false,
   lyricsPlayerBarDrawerAutoEnableForMv: settings.lyricsPlayerBarDrawerAutoEnableForMv !== false,
   lyricsPlayerBarDrawerAutoHideEnabled: settings.lyricsPlayerBarDrawerAutoHideEnabled !== false,
@@ -1063,6 +1069,11 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     () => miniPlayerArtworkUrl(currentMiniPlayerTrack),
     [currentMiniPlayerTrack],
   );
+  const useAfterglowMiniPlayerPalette =
+    activeLyricsViewMode === 'lyrics' &&
+    lyricsMiniPlayerSettings.lyricsPageStyle === 'afterglowCover' &&
+    lyricsMiniPlayerSettings.lowLoadPlaybackModeEnabled !== true &&
+    lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode === 'default';
   const lyricsMiniPlayerStyle = useMemo<CSSProperties>(() => {
     const opacity = Math.max(0.2, Math.min(1, (lyricsMiniPlayerSettings.lyricsPlayerBarDrawerOpacityPercent ?? 78) / 100));
     const colorMode = lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode ?? 'default';
@@ -1092,6 +1103,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       '--lyrics-mini-player-background': `rgba(${channels}, ${opacity.toFixed(2)})`,
       '--lyrics-mini-player-border': borderColor,
       ...getMiniPlayerReadablePalette(rgb, opacity, backdropRgb),
+      ...(useAfterglowMiniPlayerPalette ? createAfterglowCoverMiniPlayerPalette(lyricsMiniPlayerCoverSample, opacity) : {}),
     } as CSSProperties;
   }, [
     lyricsMiniPlayerCoverSample,
@@ -1099,6 +1111,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode,
     lyricsMiniPlayerSettings.lyricsPlayerBarDrawerOpacityPercent,
     appAppearanceTheme,
+    useAfterglowMiniPlayerPalette,
   ]);
   const usesPortraitAppWallpaperOverride = Boolean(
     isAppWallpaperPortraitViewport && appWallpaperSettings.appPortraitWallpaperPath,
@@ -2465,7 +2478,9 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
       const patch = (event as CustomEvent<Partial<AppSettings>> | undefined)?.detail;
       if (
         patch &&
-        ('lyricsPlayerBarDrawerEnabled' in patch ||
+        ('lyricsPageStyle' in patch ||
+          'lowLoadPlaybackModeEnabled' in patch ||
+          'lyricsPlayerBarDrawerEnabled' in patch ||
           'lyricsPlayerBarDrawerAutoEnableForMv' in patch ||
           'lyricsPlayerBarDrawerAutoHideEnabled' in patch ||
           'lyricsPlayerBarDrawerShortcutEnabled' in patch ||
@@ -2554,7 +2569,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
   useEffect(() => {
     if (
       !shouldUseLyricsPlayerDrawer ||
-      lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode !== 'cover' ||
+      (lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode !== 'cover' && !useAfterglowMiniPlayerPalette) ||
       !lyricsMiniPlayerCoverUrl
     ) {
       setLyricsMiniPlayerCoverSample(null);
@@ -2576,6 +2591,7 @@ export const AppLayout = ({ routes }: AppLayoutProps): JSX.Element => {
     lyricsMiniPlayerCoverUrl,
     lyricsMiniPlayerSettings.lyricsPlayerBarDrawerColorMode,
     shouldUseLyricsPlayerDrawer,
+    useAfterglowMiniPlayerPalette,
   ]);
 
   useEffect(() => {

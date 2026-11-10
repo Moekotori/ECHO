@@ -76,20 +76,6 @@ const formatBitrate = (bitrate: number | null): string | null => {
   return bitrate >= 1000000 ? `${(bitrate / 1000000).toFixed(1)}Mbps` : `${Math.round(bitrate / 1000)}kbps`;
 };
 
-const formatTechnicalSummary = (track: LibraryTrack | null): string | null => {
-  if (!track) {
-    return null;
-  }
-
-  return [
-    track.codec?.toUpperCase() ?? null,
-    track.bitDepth ? `${track.bitDepth}bit` : null,
-    formatSampleRate(track.sampleRate),
-  ]
-    .filter(Boolean)
-    .join(' / ') || null;
-};
-
 const uniqueValues = (values: Array<string | null | undefined>): string[] =>
   Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
 
@@ -849,16 +835,13 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
   const albumCoverLoadStartedRef = useRef<string | null>(null);
   const likedTrackIds = useLikedTrackIds(loadedTracks.map((track) => track.id));
   const duration = formatDuration(album.duration, t);
-  const formatSummary = formatTechnicalSummary(firstTrack);
   const albumMetadata = useMemo(
     () =>
       [
-        album.year ? String(album.year) : null,
         formatTrackCount(album.trackCount, t),
         duration,
-        formatSummary,
       ].filter((item): item is string => Boolean(item)),
-    [album.trackCount, album.year, duration, formatSummary, t],
+    [album.trackCount, duration, t],
   );
   const signalItems = useMemo(
     () =>
@@ -3030,15 +3013,17 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
         </button>
 
         <section className="album-detail-hero" aria-label={`${streamingAlbum.title} 流媒体专辑详情`}>
-          <div className="album-detail-cover" data-empty={!coverSrc}>
-            {coverSrc ? <img alt="" decoding="async" draggable={false} height={320} src={coverSrc} width={320} /> : <Disc3 size={58} />}
+          <div className="album-detail-sleeve">
+            <div className="album-detail-cover" data-empty={!coverSrc}>
+              {coverSrc ? <img alt="" decoding="async" draggable={false} height={320} src={coverSrc} width={320} /> : <Disc3 size={58} />}
+            </div>
           </div>
 
           <div className="album-detail-console">
             <div className="album-detail-copy">
               <span className="album-detail-kicker">流媒体专辑</span>
               <h1>{streamingAlbum.title}</h1>
-              <p>{streamingAlbum.artist}</p>
+              <p className="album-detail-artist">{streamingAlbum.artist}</p>
               <div className="album-detail-meta" aria-label="流媒体专辑信息">
                 {[streamingAlbum.provider, streamingAlbum.releaseDate, streamingAlbum.trackCount ? `${streamingAlbum.trackCount} 首歌` : null].filter(Boolean).map((item) => (
                   <span key={item}>{item}</span>
@@ -3110,27 +3095,29 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
       </button>
 
       <section className="album-detail-hero album-detail-switch-surface" key={`album-hero-${album.id}`} aria-label={t('albumDetail.aria.details', { album: album.title })}>
-        <div
-          className="album-detail-cover"
-          data-empty={!detailCoverSrc}
-          role={detailCoverSrc ? 'button' : undefined}
-          tabIndex={detailCoverSrc ? 0 : undefined}
-          aria-label={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
-          title={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
-          onClick={detailCoverSrc ? () => setIsCoverPreviewOpen(true) : undefined}
-          onKeyDown={detailCoverSrc ? (event: ReactKeyboardEvent<HTMLDivElement>) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              setIsCoverPreviewOpen(true);
-            }
-          } : undefined}
-          onContextMenu={handleDetailCoverContextMenu}
-        >
-          {detailCoverSrc ? (
-            <img alt="" decoding="async" draggable={false} height={320} src={detailCoverSrc} width={320} onError={() => handleDetailCoverError(detailCoverSrc)} />
-          ) : (
-            <Disc3 size={58} />
-          )}
+        <div className="album-detail-sleeve">
+          <div
+            className="album-detail-cover"
+            data-empty={!detailCoverSrc}
+            role={detailCoverSrc ? 'button' : undefined}
+            tabIndex={detailCoverSrc ? 0 : undefined}
+            aria-label={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
+            title={detailCoverSrc ? t('albumDetail.action.viewCover') : undefined}
+            onClick={detailCoverSrc ? () => setIsCoverPreviewOpen(true) : undefined}
+            onKeyDown={detailCoverSrc ? (event: ReactKeyboardEvent<HTMLDivElement>) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setIsCoverPreviewOpen(true);
+              }
+            } : undefined}
+            onContextMenu={handleDetailCoverContextMenu}
+          >
+            {detailCoverSrc ? (
+              <img alt="" decoding="async" draggable={false} height={320} src={detailCoverSrc} width={320} onError={() => handleDetailCoverError(detailCoverSrc)} />
+            ) : (
+              <Disc3 size={58} />
+            )}
+          </div>
         </div>
 
         <div className="album-detail-console">
@@ -3216,7 +3203,6 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
           initialLoadDelayMs={shouldDelayAlbumTrackInitialLoad ? albumDetailPlaybackPriorityTrackDelayMs : 0}
           summary={{
             duration: duration ?? t('albumDetail.status.unknownLength'),
-            signal: formatSummary ?? t('albumDetail.status.readingSignal'),
             totalLabel: loadedTotal > 0 ? formatTrackCount(loadedTotal, t) : formatTrackCount(album.trackCount, t),
           }}
           onFirstTrackChange={handleFirstTrackChange}

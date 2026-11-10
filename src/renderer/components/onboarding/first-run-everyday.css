@@ -1,0 +1,76 @@
+.first-run-everyday {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  color: var(--fr-ink);
+}
+
+.first-run-everyday > section {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--fr-line);
+  border-radius: 18px;
+  background: var(--fr-panel);
+}
+
+.first-run-everyday > section:first-child {
+  grid-column: 1 / -1;
+}
+
+.first-run-daily-presence .first-run-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.first-run-everyday h4,
+.first-run-daily-presence h4 {
+  margin: 0 0 8px;
+  color: var(--fr-ink);
+}
+
+.first-run-everyday p,
+.first-run-daily-presence p {
+  margin: 8px 0;
+  color: var(--fr-muted);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.first-run-shortcut-list {
+  margin: 12px 0 0;
+}
+
+.first-run-shortcut-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--fr-line);
+  font-size: 13px;
+}
+
+.first-run-shortcut-list dd {
+  margin: 0;
+  text-align: right;
+}
+
+.first-run-shortcut-list kbd {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--fr-paper);
+  color: var(--fr-ink);
+  overflow-wrap: anywhere;
+}
+
+.first-run-shortcut-list > div:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 1180px) {
+  .first-run-everyday,
+  .first-run-daily-presence .first-run-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -42,6 +42,7 @@ type LyricsViewProps = {
   showTranslation?: boolean;
   showTimestamps?: boolean;
   wordHighlightEnabled?: boolean;
+  wordHighlightProgressMode?: 'continuous' | 'discrete';
   highFrequencyUpdatesEnabled?: boolean;
   textDirection?: LyricsTextDirection;
 };
@@ -362,6 +363,7 @@ export const LyricsView = ({
   showTranslation = true,
   showTimestamps = false,
   wordHighlightEnabled = true,
+  wordHighlightProgressMode = 'continuous',
   highFrequencyUpdatesEnabled = true,
   textDirection = 'horizontal',
 }: LyricsViewProps): JSX.Element | null => {
@@ -513,7 +515,7 @@ export const LyricsView = ({
 
     if (currentWordIndex >= 0) {
       const currentWord = wordElements[currentWordIndex];
-      const progressValue = reducedMotion
+      const progressValue = reducedMotion || wordHighlightProgressMode === 'discrete'
         ? '1'
         : getWordProgress(words, currentWordIndex, adjustedPositionMs, fallbackLineEndMs).toFixed(4);
       if (wordProgressRef.current?.progressValue !== progressValue) {
@@ -713,6 +715,7 @@ export const LyricsView = ({
     isSynced,
     isPlain,
     wordHighlightEnabled,
+    wordHighlightProgressMode,
   ]);
 
   useLayoutEffect(() => {

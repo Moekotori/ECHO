@@ -1,0 +1,9 @@
+/* The image already contains the production scene; no live preview DOM or effects. */
+.lyrics-style-thumbnail {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: 8px;
+}

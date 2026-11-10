@@ -12306,8 +12306,8 @@ html[data-theme-preset="FINAL"] .album-detail-page::before {
   opacity: 0.58;
 }
 
-html[data-theme-preset="FINAL"] .album-back-button {
-  left: var(--album-detail-page-x);
+html[data-theme-preset="FINAL"] .album-detail-page > .album-back-button {
+  position: absolute;
 }
 
 html[data-theme-preset="FINAL"] .album-detail-hero {
@@ -12341,8 +12341,7 @@ html[data-theme-preset="FINAL"] .album-detail-hero > * {
 }
 
 html[data-theme-preset="FINAL"] .album-detail-cover {
-  width: min(292px, 21vw);
-  min-width: 220px;
+  width: 100%;
 }
 
 html[data-theme-preset="FINAL"] .album-detail-console {
@@ -12352,7 +12351,7 @@ html[data-theme-preset="FINAL"] .album-detail-console {
 
 html[data-theme-preset="FINAL"] .album-detail-copy h1 {
   max-width: 440px;
-  font-size: clamp(38px, 3.2vw, 58px);
+  font-size: clamp(28px, 4cqi, 58px);
   line-height: 0.98;
 }
 
@@ -12361,6 +12360,8 @@ html[data-theme-preset="FINAL"] .album-detail-meta {
 }
 
 html[data-theme-preset="FINAL"] .album-detail-facts {
+  grid-column: auto;
+  grid-template-columns: minmax(0, 1fr);
   width: min(100%, 270px);
   align-self: center;
   padding: 18px 16px;
@@ -12438,14 +12439,19 @@ html[data-theme-preset="FINAL"] .album-related-album-copy small {
   font-size: 11px;
 }
 
-@media (max-width: 1180px) {
+@container album-detail (max-width: 940px) {
   html[data-theme-preset="FINAL"] .album-detail-hero {
-    grid-template-columns: minmax(200px, 270px) minmax(260px, 1fr);
+    grid-template-columns: minmax(0, 0.65fr) minmax(0, 1fr);
   }
 
-  html[data-theme-preset="FINAL"] .album-detail-hero::after,
-  html[data-theme-preset="FINAL"] .album-detail-facts {
+  html[data-theme-preset="FINAL"] .album-detail-hero::after {
     display: none;
+  }
+
+  html[data-theme-preset="FINAL"] .album-detail-facts {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+    width: 100%;
   }
 }
 
@@ -12454,18 +12460,27 @@ html[data-theme-preset="FINAL"] .album-related-album-copy small {
     width: 100%;
     padding-inline: 18px;
   }
+}
 
-  html[data-theme-preset="FINAL"] .album-detail-hero {
-    grid-template-columns: 1fr;
-  }
-
-  html[data-theme-preset="FINAL"] .album-detail-cover {
-    width: min(100%, 320px);
+@container album-detail (max-width: 680px) {
+  html[data-theme-preset="FINAL"] .album-detail-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   html[data-theme-preset="FINAL"] .album-track-header,
   html[data-theme-preset="FINAL"] .album-track-row {
-    grid-template-columns: 36px minmax(0, 1fr) 56px 28px;
+    grid-template-columns: 28px minmax(0, 1fr) 46px 28px;
+    gap: 12px;
+  }
+}
+
+@container album-detail (max-width: 480px) {
+  html[data-theme-preset="FINAL"] .album-detail-hero {
+    grid-template-columns: 1fr;
+  }
+
+  html[data-theme-preset="FINAL"] .album-detail-sleeve {
+    width: min(100%, 320px);
   }
 }
 

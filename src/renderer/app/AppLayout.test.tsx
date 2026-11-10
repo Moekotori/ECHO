@@ -2433,6 +2433,7 @@ describe('AppLayout standalone routes', () => {
     window.echo = {
       app: {
         getSettings: vi.fn().mockResolvedValue({
+          lyricsPageStyle: 'default',
           lyricsPlayerBarDrawerEnabled: true,
           lyricsPlayerBarDrawerAutoHideEnabled: false,
           lyricsPlayerBarDrawerOpacityPercent: 20,

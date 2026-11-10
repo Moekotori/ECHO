@@ -47,6 +47,19 @@ afterEach(() => {
 });
 
 describe('TrackList', () => {
+  it('scrolls to the playing row when a locate request arrives', () => {
+    const tracks = [track(1), track(2), track(3)];
+    const { rerender } = render(<TrackList currentTrackId="track-2" tracks={tracks} />);
+    const list = screen.getByRole('list');
+    const scrollTo = vi.fn();
+    list.scrollTo = scrollTo;
+    Object.defineProperty(list, 'scrollHeight', { value: 228 });
+
+    rerender(<TrackList currentTrackId="track-2" tracks={tracks} locateRequest={{ trackId: 'track-2' }} />);
+
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 114 }));
+  });
+
   it('can locate a known current track after its page has been replaced', () => {
     const onViewportNeeded = vi.fn();
     render(<TrackList currentTrackId="track-1" currentTrackIndex={0} tracks={[track(10001)]}

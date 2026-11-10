@@ -14,6 +14,7 @@ type StyledSelectProps<T extends string> = {
   options: Array<StyledSelectOption<T>>;
   onChange: (value: T) => void;
   ariaLabel: string;
+  triggerAriaLabel?: string;
   className?: string;
   disabled?: boolean;
   showFilterIcon?: boolean;
@@ -25,6 +26,7 @@ export function StyledSelect<T extends string>({
   options,
   onChange,
   ariaLabel,
+  triggerAriaLabel,
   className,
   disabled = false,
   showFilterIcon = true,
@@ -149,6 +151,7 @@ export function StyledSelect<T extends string>({
         ref={buttonRef}
         className="sort-button"
         type="button"
+        aria-label={triggerAriaLabel}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}

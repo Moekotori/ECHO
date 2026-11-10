@@ -31,7 +31,7 @@ export const appVideoWallpaperPauseModeLabels: Record<
   never: 'settings.appearance.wallpaper.videoPause.never',
 };
 
-type AppWallpaperEffectPresetId = 'balanced' | 'soft' | 'immersive';
+export type AppWallpaperEffectPresetId = 'balanced' | 'soft' | 'immersive';
 
 type AppWallpaperEffectPatch = Pick<
   AppSettings,

@@ -5,9 +5,10 @@ import { audioFormatFilterOptions, fileFormatFilterLabelKey } from './songs/song
 import { toggleSongMultiSort } from '../utils/songSortSelection';
 import { readStoredSongSortPreference, writeStoredSongSortPreference } from '../utils/songSortPreference';
 import '../styles/songs-filter.css';
+import '../styles/songs-page-polish.css';
 import { useTrackViewportPaging, type TrackViewportLoadMode, type TrackViewportRange } from '../hooks/useTrackViewportPaging';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpDown, Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, LocateFixed, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
 import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryAudioFormatFilter, LibraryFileFormatFilter, LibraryFolder, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import type { StreamingProviderDescriptor, StreamingProviderName, StreamingSearchResult, StreamingTrack } from '../../shared/types/streaming';
@@ -437,6 +438,9 @@ export const SongsPage = (): JSX.Element => {
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const { currentTrackId, playTrack, appendToQueue, appendTracksToQueue, playTrackNext, removeTrackFromQueue } = usePlaybackQueue();
+  const currentTrackIdRef = useRef(currentTrackId);
+  currentTrackIdRef.current = currentTrackId;
+  const [locateRequest, setLocateRequest] = useState<{ trackId: string } | null>(null);
   const playbackActivityState = useSharedPlaybackActivityState();
   const remoteSourceRefreshPlaybackBusy = isRemoteSourceRefreshPlaybackBusy(playbackActivityState);
   const visibleTrackIdsKey = useMemo(() => visibleTrackIds.join('\0'), [visibleTrackIds]);
@@ -846,7 +850,7 @@ export const SongsPage = (): JSX.Element => {
     async (
       nextPage: number,
       mode: 'replace' | 'append' | 'prepend',
-      options: { pageSizeOverride?: number; preserveListInstance?: boolean; restoreScrollTop?: number; additionalPages?: number } = {},
+      options: { pageSizeOverride?: number; preserveListInstance?: boolean; restoreScrollTop?: number; additionalPages?: number; locateTrackId?: string } = {},
     ) => {
       if (mode !== 'replace' && isLoadingRef.current) {
         return;
@@ -893,12 +897,21 @@ export const SongsPage = (): JSX.Element => {
           showDuplicatesOnly,
           showOsuOnly,
           duplicateMode: 'strict',
+          ...(options.locateTrackId ? { locateTrackId: options.locateTrackId } : {}),
         } as const;
         const queryKey = createSongsFirstPageSnapshotQueryKey(query);
-        const shouldUseFirstPageSnapshot = mode === 'replace' && nextPage === 1 && canUseSongsFirstPageSnapshot(query);
+        const shouldUseFirstPageSnapshot = !options.locateTrackId && mode === 'replace' && nextPage === 1 && canUseSongsFirstPageSnapshot(query);
         const queryStartedAt = performance.now();
         const result = await library.getTracks(query);
         if (requestIdRef.current !== requestId) return;
+        if (options.locateTrackId) {
+          if (currentTrackIdRef.current !== options.locateTrackId) return;
+          if (!result.items.some((track) => track.id === options.locateTrackId)) {
+            setStatusMessage(t('songs.locateCurrentTrack.unavailable'));
+            return;
+          }
+          setLocateRequest({ trackId: options.locateTrackId });
+        }
         if (options.additionalPages && result.hasMore) {
           const following = await Promise.all(Array.from({ length: options.additionalPages }, (_, index) =>
             library.getTracks({ ...query, page: nextPage + index + 1 })));
@@ -1093,6 +1106,15 @@ export const SongsPage = (): JSX.Element => {
   const knownCurrentPosition = knownCurrentTrackPositionRef.current;
   const currentTrackIndex = knownCurrentPosition?.queryKey === viewportQueryKey && knownCurrentPosition.trackId === currentTrackId
     ? knownCurrentPosition.index : null;
+  const handleLocateCurrentTrack = (): void => {
+    if (!currentTrackId || isLoadingRef.current) return;
+    if (loadedCurrentTrackIndex >= 0) {
+      setStatusMessage(null);
+      setLocateRequest({ trackId: currentTrackId });
+      return;
+    }
+    void loadTracks(1, 'replace', { preserveListInstance: true, locateTrackId: currentTrackId });
+  };
   const requestViewportPage = useTrackViewportPaging({
     queryKey: viewportQueryKey,
     pageSize,
@@ -2009,6 +2031,16 @@ export const SongsPage = (): JSX.Element => {
         </div>
 
         <div className="songs-tools" aria-label={t('songs.tools.aria')}>
+          <button
+            className="tool-button"
+            type="button"
+            aria-label={t('settings.shortcuts.action.locateCurrentTrack.title')}
+            title={t('settings.shortcuts.action.locateCurrentTrack.title')}
+            onClick={handleLocateCurrentTrack}
+            disabled={!currentTrackId || isLoading}
+          >
+            <LocateFixed size={17} aria-hidden="true" />
+          </button>
           <button className="tool-button" type="button" aria-label={t('route.importFolder.label')} title={t('route.importFolder.label')} onClick={handleImportFolder}>
             <FolderPlus size={17} />
           </button>
@@ -2209,9 +2241,11 @@ export const SongsPage = (): JSX.Element => {
 
       <TrackList
         key={listVersion}
+        variant="songs"
         tracks={tracks}
         currentTrackId={currentTrackId}
         currentTrackIndex={currentTrackIndex}
+        locateRequest={locateRequest}
         canLoadMore={hasMore && !isLoading}
         canLoadPrevious={loadedStartIndex > 0 && !isLoading}
         totalCount={total}

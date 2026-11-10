@@ -1691,9 +1691,11 @@ describe('library IPC', () => {
     await handlers[IpcChannels.LibraryGetTracks]!(null, {
       sorts: ['artistDesc', 'albumDesc', 'not-a-sort', 'artistDesc'], fileFormatFilter: 'flac',
       folderIds: ['folder-1', 42, 'folder-1'], filterYear: 2026, filterGenre: ' Jazz ',
+      locateTrackId: ' track-1 ',
     });
     expect(service.getTracksAsync).toHaveBeenCalledWith({
       sorts: ['artistDesc', 'albumDesc'], fileFormatFilter: 'flac', folderIds: ['folder-1'], filterYear: 2026, filterGenre: 'Jazz',
+      locateTrackId: 'track-1',
     });
   });
 

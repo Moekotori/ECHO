@@ -3,7 +3,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path
 import { app } from 'electron';
 import { musicDownloadsEnabled } from '../../shared/constants/downloadAvailability';
 import { finalThemeUnlockVersion, proOnlyThemePresets } from '../../shared/constants/featureUnlocks';
-import { artistOnlineInfoSources, artistStreamingAlbumProviders, autoUpdateSources, defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider, playerBarButtonIds } from '../../shared/types/appSettings';
+import { artistOnlineInfoSources, artistStreamingAlbumProviders, autoUpdateSources, defaultArtistOnlineInfoSources, defaultArtistStreamingAlbumsProvider, defaultLyricsPageStyle, playerBarButtonIds } from '../../shared/types/appSettings';
 import { defaultSidebarHiddenRouteIds, defaultSidebarRouteOrder, normalizeSidebarHiddenRouteIds, normalizeSidebarRouteOrder } from '../../shared/types/sidebar';
 import type {
   ArtistOnlineInfoSource,
@@ -583,7 +583,7 @@ export const defaultSettings: AppSettings = {
   lyricsContextOpacityPercent: 49,
   lyricsColor: defaultLyricsColor,
   lyricsSmartReadableColorsEnabled: false,
-  lyricsPageStyle: 'default',
+  lyricsPageStyle: defaultLyricsPageStyle,
   lyricsImmersiveCoverStyleEnabled: false,
   lyricsImmersiveCoverGlassEnabled: false,
   lyricsImmersiveCoverGlassBlurPx: 16,
@@ -1446,9 +1446,9 @@ const normalizeLyricsMiniPlayerColorMode = (value: unknown): LyricsMiniPlayerCol
     : defaultSettings.lyricsPlayerBarDrawerColorMode ?? 'default';
 
 const normalizeLyricsPageStyle = (value: unknown): LyricsPageStyle =>
-  value === 'editorial' || value === 'roseVinyl'
+  value === 'default' || value === 'afterglowCover' || value === 'editorial' || value === 'folded' || value === 'roseVinyl'
     ? value
-    : defaultSettings.lyricsPageStyle ?? 'default';
+    : defaultLyricsPageStyle;
 
 const normalizeDesktopLyricsColorMode = (value: unknown, legacyColor: unknown): DesktopLyricsColorMode => {
   if (value === 'theme' || value === 'custom' || value === 'gradient') {

@@ -5,6 +5,7 @@ import {
   Captions,
   Check,
   ChevronDown,
+  Diamond,
   Disc3,
   EyeOff,
   FolderOpen,
@@ -14,13 +15,14 @@ import {
   RotateCcw,
   Search,
   SlidersHorizontal,
+  Sunset,
   Trash2,
   Type,
   Upload,
   X,
   Zap,
 } from 'lucide-react';
-import type { AppSettings, LyricsMiniPlayerColorMode, LyricsPageStyle } from '../../../shared/types/appSettings';
+import { defaultLyricsPageStyle, type AppSettings, type LyricsMiniPlayerColorMode, type LyricsPageStyle } from '../../../shared/types/appSettings';
 import type { MvSettings } from '../../../shared/types/mv';
 import { musicReactiveVisualsFeatureEnabled } from '../../../shared/utils/musicReactiveScene';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
@@ -152,7 +154,7 @@ const fallbackAppSettings: LyricsVisualAppSettings = {
   lyricsLineMaxChars: 0,
   lyricsContextOpacityPercent: 49,
   lyricsColor: '#314054',
-  lyricsPageStyle: 'default',
+  lyricsPageStyle: defaultLyricsPageStyle,
   lyricsImmersiveCoverStyleEnabled: false,
   lyricsImmersiveCoverGlassEnabled: false,
   lyricsImmersiveCoverGlassBlurPx: 16,
@@ -397,18 +399,20 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
   const isSecondaryLyricsSizeOpen = appSettings.lyricsRomanizationEnabled || appSettings.lyricsTranslationEnabled;
   const lyricsPageStyleOptions = useMemo(
     () => [
-      { mode: 'default', label: t('lyricsSettings.visual.pageStyleDefault') },
-      { mode: 'editorial', label: t('lyricsSettings.visual.pageStyleEditorial') },
-      { mode: 'roseVinyl', label: t('lyricsSettings.visual.pageStyleRoseVinyl') },
-    ] satisfies Array<{ mode: LyricsPageStyle; label: string }>,
+      { mode: 'default', label: t('lyricsSettings.visual.pageStyleDefault'), Icon: LayoutTemplate },
+      { mode: 'afterglowCover', label: t('lyricsSettings.visual.pageStyleAfterglowCover'), Icon: Sunset },
+      { mode: 'editorial', label: t('lyricsSettings.visual.pageStyleEditorial'), Icon: BookOpenText },
+      { mode: 'folded', label: t('lyricsSettings.visual.pageStyleFolded'), Icon: Diamond },
+      { mode: 'roseVinyl', label: t('lyricsSettings.visual.pageStyleRoseVinyl'), Icon: Disc3 },
+    ] satisfies Array<{ mode: LyricsPageStyle; label: string; Icon: typeof Disc3 }>,
     [t],
   );
-  const lyricsPageStyle = appSettings.lyricsPageStyle ?? fallbackAppSettings.lyricsPageStyle ?? 'default';
+  const lyricsPageStyle = appSettings.lyricsPageStyle ?? defaultLyricsPageStyle;
   const canUseImmersiveGlassControls =
     appSettings.lyricsImmersiveCoverStyleEnabled === true || lyricsPageStyle === 'roseVinyl';
   const lyricsPageStyleLabel =
     lyricsPageStyleOptions.find((option) => option.mode === lyricsPageStyle)?.label ??
-    t('lyricsSettings.visual.pageStyleDefault');
+    t('lyricsSettings.visual.pageStyleAfterglowCover');
   const displayedGlassBlurPx = glassBlurDraftPx ?? appSettings.lyricsImmersiveCoverGlassBlurPx;
   const displayedRoseVinylBackgroundBlurPx =
     roseVinylBackgroundBlurDraftPx ?? appSettings.lyricsRoseVinylBackgroundBlurPx;
@@ -822,11 +826,6 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
               >
                 {lyricsPageStyleOptions.map((option) => {
                   const isSelected = option.mode === lyricsPageStyle;
-                  const icon = option.mode === 'editorial'
-                    ? <BookOpenText size={19} aria-hidden="true" />
-                    : option.mode === 'roseVinyl'
-                      ? <Disc3 size={19} aria-hidden="true" />
-                      : <LayoutTemplate size={19} aria-hidden="true" />;
 
                   return (
                     <button
@@ -839,7 +838,7 @@ export const LyricsVisualSettingsDrawer = ({ isOpen, onClose }: LyricsVisualSett
                       disabled={isBusy}
                       onClick={() => void patchAppSettings({ lyricsPageStyle: option.mode })}
                     >
-                      <span className="lyrics-page-style-choice__icon">{icon}</span>
+                      <span className="lyrics-page-style-choice__icon"><option.Icon size={19} aria-hidden="true" /></span>
                       <span className="lyrics-page-style-choice__label">{option.label}</span>
                       <span className="lyrics-page-style-choice__check" aria-hidden="true">
                         <Check size={12} />

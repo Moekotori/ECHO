@@ -61,6 +61,7 @@ import { setLaunchAtLoginEnabled } from '../app/launchAtLogin';
 import { ensureTray, requestAppQuit } from '../app/tray';
 import { ensureCoverCacheDirectory } from '../library/CoverCacheManager';
 import { syncExternalCoverCacheUninstallRecord } from '../library/CoverCacheOwnership';
+import { setAppWallpaperPreviewPath } from '../protocol/appWallpaperPreview';
 import { getLibraryService } from '../library/LibraryService';
 import { setDiscordPresenceEnabled } from '../integrations/discord/getDiscordPresenceService';
 import { getLastFmService } from '../integrations/lastfm/getLastFmService';
@@ -843,7 +844,11 @@ export const registerIpc = (): void => {
       ],
     });
 
-    return result.canceled || !result.filePaths[0] ? null : await copyAppWallpaper(result.filePaths[0]);
+    if (result.canceled || !result.filePaths[0]) return null;
+
+    const wallpaperPath = await copyAppWallpaper(result.filePaths[0]);
+    setAppWallpaperPreviewPath(wallpaperPath);
+    return wallpaperPath;
   });
   ipcMain.handle(IpcChannels.AppLoadFontFile, (_event: IpcMainInvokeEvent, fontPath: unknown): FontFileAsset => loadFontFile(fontPath));
   ipcMain.handle(IpcChannels.AppChooseCacheDirectory, async (): Promise<string | null> => {

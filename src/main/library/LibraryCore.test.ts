@@ -2903,6 +2903,13 @@ describe('Library Core', () => {
       expect(folderPage.items.map((track) => track.title)).toEqual(['Coffee', 'Zebra']);
       expect(folderPage.total).toBe(4);
       expect(folderPage.hasMore).toBe(true);
+
+      const located = service.getTracks({ pageSize: 2, sort: 'titleAsc', locateTrackId: 'track-ai' });
+      expect(located).toMatchObject({ page: 2, total: 4, hasMore: false });
+      expect(located.items.map((track) => track.id)).toEqual(['track-bu', 'track-ai']);
+      expect(service.getTracks({ search: 'Coffee', locateTrackId: 'track-c' }).items.map((track) => track.id)).toEqual(['track-c']);
+      expect(service.getTracks({ search: 'Coffee', locateTrackId: 'track-ai' })).toMatchObject({ items: [], total: 1 });
+      expect(service.getTracks({ pageSize: 1, sort: 'random', locateTrackId: 'track-ai' }).items.map((track) => track.id)).toEqual(['track-ai']);
     } finally {
       service.close();
     }

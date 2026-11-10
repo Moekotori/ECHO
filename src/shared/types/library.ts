@@ -865,6 +865,8 @@ export type LibraryPageQuery = {
   prioritizeArtistAvatars?: boolean;
   excludeTrackIds?: string[];
   randomWindow?: boolean;
+  /** For a track list, return the page containing this track, or no items if it is filtered out. */
+  locateTrackId?: string;
 };
 
 export type PlaylistKind = 'manual' | 'smart' | 'synced' | 'system';

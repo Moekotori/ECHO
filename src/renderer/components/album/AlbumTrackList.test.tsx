@@ -209,7 +209,7 @@ describe('AlbumTrackList', () => {
       <AlbumTrackList
         albumId="album-1"
         currentTrackId={null}
-        summary={{ duration: '42 min', signal: 'DSF / 1bit / 5645kHz', totalLabel: '2 tracks' }}
+        summary={{ duration: '42 min', totalLabel: '2 tracks' }}
         onPlayTrack={vi.fn()}
       />,
     );
@@ -217,7 +217,6 @@ describe('AlbumTrackList', () => {
     const summary = await screen.findByLabelText('Track summary');
     expect(summary.textContent).toContain('2 tracks');
     expect(summary.textContent).toContain('42 min');
-    expect(summary.textContent).toContain('DSF / 1bit / 5645kHz');
     expect(await screen.findByText('No tracks found for this album.')).toBeTruthy();
   });
 });

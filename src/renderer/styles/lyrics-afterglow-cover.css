@@ -1,0 +1,384 @@
+/* 余晖: cover-led reading stage. Default colors follow the bounded cover sampler. */
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] {
+  --afterglow-cover-bg-rgb: 27 23 22;
+  --afterglow-cover-wash-rgb: 111 70 45;
+  --afterglow-cover-accent-rgb: 241 194 143;
+  --afterglow-cover-ink: rgb(249 245 237);
+  --afterglow-cover-size: min(34vw, 50vh, 560px);
+  --afterglow-cover-left: clamp(36px, 4.8vw, 86px);
+  --afterglow-cover-top: max(76px, calc((100% - var(--afterglow-cover-size) - 112px) / 2));
+  --afterglow-cover-copy-gap: 28px;
+  --lyrics-readable-color: rgb(249 245 237 / .65);
+  --lyrics-word-fill-color: rgb(var(--afterglow-cover-accent-rgb));
+  --lyrics-word-accent-color: rgb(var(--afterglow-cover-accent-rgb));
+  --lyrics-word-upcoming-color: rgb(249 245 237 / .94);
+  --lyrics-word-glow-color: transparent;
+  --lyrics-smart-primary-color: var(--afterglow-cover-ink);
+  --lyrics-smart-secondary-color: rgb(249 245 237 / .65);
+  --lyrics-smart-shadow: none;
+  --lyrics-smart-stroke: 0 transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  color: var(--afterglow-cover-ink);
+  /* theme-color-allow: this style uses a dark cover-derived stage in every app theme. */
+  background: rgb(var(--afterglow-cover-bg-rgb));
+  isolation: isolate;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"][data-lyrics-color-mode="manual"] {
+  --afterglow-cover-lyrics-ink: var(--lyrics-color);
+  --afterglow-cover-lyrics-secondary: color-mix(in srgb, var(--lyrics-color) 78%, transparent);
+  --afterglow-cover-lyrics-fill: var(--lyrics-color);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"]::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* theme-color-allow: the wash comes from the current cover sample. */
+  background: radial-gradient(ellipse at 22% 42%, rgb(var(--afterglow-cover-wash-rgb) / .38), transparent 64%);
+  content: "";
+  pointer-events: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-backdrop {
+  opacity: .18;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-background="theme"] .lyrics-backdrop {
+  opacity: 0;
+}
+
+.lyrics-afterglow-cover {
+  position: absolute;
+  top: var(--afterglow-cover-top);
+  left: var(--afterglow-cover-left);
+  z-index: 2;
+  display: grid;
+  width: var(--afterglow-cover-size);
+  aspect-ratio: 1;
+  place-items: center;
+  /* theme-color-allow: fixed ivory placeholder on the dark cover stage. */
+  color: rgb(249 245 237 / .42);
+  border-radius: 12px;
+  /* theme-color-allow: cover-derived backdrop behind the artwork. */
+  background: rgb(var(--afterglow-cover-wash-rgb) / .26);
+  /* theme-color-allow: artwork shadow is part of this fixed dark stage. */
+  box-shadow: 0 26px 70px rgb(0 0 0 / .28);
+  pointer-events: none;
+}
+
+.lyrics-afterglow-cover img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.lyrics-afterglow-cover__echo {
+  opacity: .24;
+  transform: translate(9%, 4%) rotate(4deg) scale(.94);
+  filter: saturate(.7);
+}
+
+.lyrics-afterglow-cover__main {
+  /* theme-color-allow: artwork elevation on the fixed dark stage. */
+  box-shadow: 0 28px 64px rgb(0 0 0 / .34), inset 0 0 0 1px rgb(249 245 237 / .12);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel,
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 43%) minmax(0, 57%);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-back-button {
+  position: fixed;
+  top: clamp(24px, 4vh, 44px);
+  left: clamp(22px, 2.4vw, 42px);
+  z-index: 90;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  /* theme-color-allow: controls use ivory on the fixed dark stage. */
+  color: rgb(249 245 237 / .86);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-back-button:hover {
+  color: var(--afterglow-cover-ink);
+  background: transparent;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-mv-panel {
+  display: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header,
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header {
+  position: absolute;
+  top: calc(var(--afterglow-cover-top) + var(--afterglow-cover-size) + var(--afterglow-cover-copy-gap));
+  bottom: auto;
+  left: var(--afterglow-cover-left);
+  z-index: 4;
+  display: block !important;
+  width: var(--afterglow-cover-size);
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] :is(.lyrics-track-cover, .lyrics-kicker, .lyrics-track-album, .lyrics-track-status),
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] :is(.lyrics-track-cover, .lyrics-kicker, .lyrics-track-album, .lyrics-track-status) {
+  display: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy,
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy {
+  display: grid;
+  gap: 8px;
+  color: var(--afterglow-cover-ink);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy h1,
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy h1 {
+  font-size: clamp(18px, 1.35vw, 24px);
+  font-weight: 640;
+  line-height: 1.35;
+  color: var(--afterglow-cover-ink);
+  text-shadow: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-artist,
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-artist {
+  font-size: clamp(13px, .9vw, 16px);
+  font-weight: 450;
+  line-height: 1.5;
+  /* theme-color-allow: fixed secondary ink on the dark lyric stage. */
+  color: rgb(249 245 237 / .65);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > :is(.lyrics-scroll, .lyrics-empty),
+.app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > :is(.lyrics-scroll, .lyrics-empty) {
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  align-self: stretch;
+  justify-self: stretch;
+  padding: clamp(100px, 17vh, 190px) clamp(42px, 5vw, 100px) clamp(140px, 20vh, 220px) clamp(16px, 1.6vw, 30px);
+  background: transparent;
+  transform: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 82%, transparent 100%);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line {
+  min-height: calc(clamp(80px, 10vh, 118px) * var(--lyrics-line-spacing, 1.1));
+  justify-items: start;
+  text-align: left;
+  text-shadow: none;
+  transform-origin: left center;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line:not([data-active="true"]) {
+  opacity: var(--lyrics-context-opacity, .49);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line:is([data-focus-distance="2"], [data-focus-distance="3"], [data-focus-distance="4"]) {
+  opacity: calc(var(--lyrics-context-opacity, .49) * .65);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line:not([data-seekable="false"]):not([data-active="true"]):hover {
+  opacity: .85;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"] {
+  opacity: 1;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line-text {
+  width: 100%;
+  justify-items: start;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line .lyrics-line-primary {
+  max-width: min(100%, var(--lyrics-line-max-width));
+  font-size: calc(var(--lyrics-font-size, 40px) * 0.85);
+  font-weight: 520;
+  line-height: 1.34;
+  color: var(--afterglow-cover-lyrics-ink, var(--afterglow-cover-ink));
+  background: none;
+  text-shadow: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"] .lyrics-line-primary {
+  font-size: calc(clamp(38px, max(4.1vw, 50px), 72px) * (var(--lyrics-font-size, 40px) / 40px));
+  font-weight: 650;
+  letter-spacing: -.025em;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"][data-word-highlight="true"] .lyrics-word {
+  --afterglow-cover-word-upcoming: color-mix(in srgb, var(--afterglow-cover-lyrics-ink, var(--afterglow-cover-ink)) 42%, transparent);
+  --lyrics-word-upcoming-color: var(--afterglow-cover-word-upcoming);
+  --lyrics-word-fill-color: var(--afterglow-cover-lyrics-fill, rgb(var(--afterglow-cover-accent-rgb)));
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0 transparent;
+  text-shadow: none;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"][data-word-highlight="true"] .lyrics-word[data-word-state="current"] {
+  --lyrics-word-edge: .075em;
+  /* Keep unsung ink stable when the word starts; only the fill should advance. */
+  --lyrics-word-upcoming-color: var(--afterglow-cover-word-upcoming);
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"][data-word-highlight="true"] .lyrics-word .lyrics-upright-character {
+  color: inherit !important;
+  background-image: inherit !important;
+  background-clip: text !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: inherit !important;
+  text-shadow: none;
+  -webkit-text-stroke: 0 transparent;
+}
+
+/* Solid endpoints avoid tinted slivers before a word starts or after it ends.
+   The current word keeps the shared timeline-driven horizontal/vertical fill. */
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"][data-word-highlight="true"] .lyrics-word:is([data-word-state="future"], [data-word-state="passed"]) {
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+.lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line :is(small, em) {
+  font-size: calc(20px * (var(--lyrics-secondary-font-size, 22px) / 22px));
+  font-style: normal;
+  /* theme-color-allow: fixed secondary ink on the dark lyric stage. */
+  color: var(--afterglow-cover-lyrics-secondary, rgb(249 245 237 / .62));
+  text-shadow: none;
+}
+
+@media (max-width: 1000px) {
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] {
+    --afterglow-cover-size: min(24vw, 24vh, 196px);
+    --afterglow-cover-left: clamp(26px, 6vw, 60px);
+    --afterglow-cover-top: clamp(72px, 10vh, 104px);
+  }
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel,
+  .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: calc(var(--afterglow-cover-top) + var(--afterglow-cover-size) + 28px) minmax(0, 1fr);
+  }
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header,
+  .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header {
+    top: var(--afterglow-cover-top);
+    bottom: auto;
+    left: calc(var(--afterglow-cover-left) + var(--afterglow-cover-size) + 28px);
+    width: calc(100% - var(--afterglow-cover-left) * 2 - var(--afterglow-cover-size) - 28px);
+  }
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > :is(.lyrics-scroll, .lyrics-empty),
+  .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > :is(.lyrics-scroll, .lyrics-empty) {
+    grid-column: 1;
+    grid-row: 2;
+    padding: clamp(24px, 5vh, 48px) var(--afterglow-cover-left) clamp(72px, 12vh, 120px);
+  }
+}
+
+@media (max-width: 640px) {
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] {
+    --afterglow-cover-size: min(28vw, 20vh, 144px);
+    --afterglow-cover-top: 72px;
+  }
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header,
+  .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] > .lyrics-left-panel > .lyrics-track-header {
+    left: calc(var(--afterglow-cover-left) + var(--afterglow-cover-size) + 20px);
+    width: calc(100% - var(--afterglow-cover-left) * 2 - var(--afterglow-cover-size) - 20px);
+  }
+  .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line[data-active="true"] .lyrics-line-primary {
+    font-size: calc(clamp(32px, 6.6vw, 46px) * (var(--lyrics-font-size, 40px) / 40px));
+  }
+}
+
+html .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"]:has(.lyrics-mv-panel[data-mv-enabled="false"]) {
+  --lyrics-readable-color: rgb(249 245 237 / .9) !important;
+  --lyrics-smart-primary-color: var(--afterglow-cover-ink) !important;
+  --lyrics-smart-secondary-color: rgb(249 245 237 / .78) !important;
+  color: var(--afterglow-cover-ink) !important;
+  /* theme-color-allow: 余晖 always uses its cover-derived dark stage. */
+  background: rgb(var(--afterglow-cover-bg-rgb)) !important;
+}
+
+html .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line .lyrics-line-primary {
+  color: var(--afterglow-cover-lyrics-ink, var(--afterglow-cover-ink)) !important;
+  /* The word marks own the fill; an inherited whole-line gradient doubles it. */
+  background-image: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 transparent;
+}
+
+html .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy h1 {
+  color: var(--afterglow-cover-ink) !important;
+  /* The word marks own the fill; an inherited whole-line gradient doubles it. */
+  background-image: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 transparent;
+}
+
+html .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-line :is(small, em) {
+  /* theme-color-allow: default secondary ink stays readable on the dark stage. */
+  color: var(--afterglow-cover-lyrics-secondary, rgb(249 245 237 / .78)) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+html .app-shell .lyrics-page[data-lyrics-page-style="afterglowCover"][data-view-mode="lyrics"] .lyrics-track-copy .lyrics-track-artist {
+  /* theme-color-allow: fixed readable secondary ink on the dark 余晖 stage. */
+  color: rgb(249 245 237 / .78) !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+.lyrics-afterglow-cover__outgoing {
+  animation: lyrics-afterglow-artwork-handoff 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes lyrics-afterglow-artwork-handoff {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-afterglow-cover__outgoing {
+    display: none;
+  }
+}

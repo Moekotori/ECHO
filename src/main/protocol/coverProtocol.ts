@@ -12,6 +12,7 @@ import { getRemoteSourceService } from '../library/remote/RemoteSourceService';
 import { beginCoverProtocolDiagnostic } from '../diagnostics/CoverProtocolDiagnostics';
 import type { DiagnosticCoverProtocolOutcome, DiagnosticCoverProtocolScheme } from '../../shared/types/diagnostics';
 import { readSubsonicCoverDiskCache, subsonicCoverDiskCacheKey, writeSubsonicCoverDiskCache } from '../library/remote/SubsonicCoverDiskCache';
+import { resolveAppWallpaperPreviewPath } from './appWallpaperPreview';
 
 const cacheControlHeader = 'public, max-age=31536000, immutable';
 const wallpaperCacheControlHeader = 'no-store';
@@ -686,8 +687,10 @@ export const registerCoverProtocolHandler = (): void => {
     const diagnostic = beginProtocolRequestDiagnostic('echo-wallpaper', request);
     try {
       const url = new URL(request.url);
+      const pathname = url.pathname.replace(/^\/+/, '');
+      const isAppPreview = url.hostname === 'app' && pathname === 'preview';
 
-      if (url.pathname.replace(/^\/+/, '') !== 'custom') {
+      if (pathname !== 'custom' && !isAppPreview) {
         return finishProtocolDiagnostic(diagnostic, missingCoverResponse(), {
           outcome: 'invalid',
           source: 'custom-wallpaper',
@@ -696,13 +699,15 @@ export const registerCoverProtocolHandler = (): void => {
       }
 
       const settings = getAppSettings();
-      const wallpaperPath = url.hostname === 'lyrics'
-        ? settings.lyricsCustomWallpaperPath
-        : url.hostname === 'app'
-          ? settings.appCustomWallpaperPath
-          : url.hostname === 'app-portrait'
-            ? settings.appPortraitWallpaperPath ?? null
-          : null;
+      const wallpaperPath = isAppPreview
+        ? resolveAppWallpaperPreviewPath(url.searchParams.get('path'))
+        : url.hostname === 'lyrics'
+          ? settings.lyricsCustomWallpaperPath
+          : url.hostname === 'app'
+            ? settings.appCustomWallpaperPath
+            : url.hostname === 'app-portrait'
+              ? settings.appPortraitWallpaperPath ?? null
+              : null;
       const wallpaperDirectory = url.hostname === 'lyrics'
         ? getLyricsWallpaperDirectory()
         : url.hostname === 'app' || url.hostname === 'app-portrait'

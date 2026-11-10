@@ -395,6 +395,10 @@ const normalizeQuery = (value: unknown): LibraryPageQuery => {
     query.search = input.search;
   }
 
+  if (typeof input.locateTrackId === 'string' && input.locateTrackId.trim()) {
+    query.locateTrackId = input.locateTrackId.trim();
+  }
+
   if (typeof input.sort === 'string' && sortValues.has(input.sort as LibrarySort)) {
     query.sort = input.sort as LibrarySort;
   }

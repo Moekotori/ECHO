@@ -1,0 +1,487 @@
+/* Give the artwork its own space, separate from the compact journey navigation. */
+.first-run-immersive-shell,
+.first-run-immersive-shell * {
+  box-sizing: border-box;
+}
+
+.first-run-immersive-shell {
+  grid-template-columns: clamp(340px, 32vw, 620px) minmax(0, 1fr);
+}
+
+.first-run-immersive-journey {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: clamp(16px, 2.2vh, 28px);
+  overflow: hidden;
+  padding: clamp(24px, 3.5vh, 44px) clamp(24px, 2.8vw, 48px) 0;
+}
+
+.first-run-phase-nav {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  margin-top: 0;
+  gap: 8px;
+}
+
+.first-run-phase-nav button {
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 8px;
+  border-width: 1px;
+  border-radius: 12px;
+}
+
+.first-run-phase-marker {
+  width: 28px;
+  height: 28px;
+  border-width: 1px;
+  border-radius: 9px;
+}
+
+.first-run-phase-copy strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.first-run-mascot {
+  position: relative;
+  inset: auto;
+  align-self: stretch;
+  width: calc(100% + 48px);
+  min-height: 0;
+  margin-inline: -24px;
+  animation: none;
+}
+
+.first-run-mascot img {
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.first-run-mascot-pose {
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 85%;
+}
+
+.first-run-mascot-bubble {
+  top: 12px;
+  left: 24px;
+  max-width: min(230px, 65%);
+}
+
+.first-run-immersive-workspace {
+  gap: 24px;
+  padding: clamp(24px, 3.5vh, 44px) clamp(28px, 3.8vw, 72px) 24px;
+}
+
+.first-run-immersive-stage {
+  gap: 20px;
+}
+
+.first-run-decor--workspace {
+  opacity: 0.4;
+}
+
+.first-run-decor span[data-kind="blob"] {
+  display: none;
+}
+
+.first-run-immersive-shell .first-run-phase-nav button {
+  border-color: transparent;
+  background: transparent;
+}
+
+.first-run-immersive-shell .first-run-phase-nav button.is-active,
+.first-run-immersive-shell .first-run-phase-nav button:hover:not(:disabled) {
+  background: var(--fr-panel);
+  border-color: var(--fr-line);
+}
+
+.first-run-immersive-shell .first-run-phase-nav button.is-active {
+  color: var(--fr-ink);
+}
+
+.first-run-phase-nav button.is-done {
+  opacity: 0.8;
+}
+
+.first-run-immersive-stage-heading {
+  margin-bottom: 4px;
+}
+
+.first-run-immersive-stage-heading h3 {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.first-run-immersive-stage-heading h3::after {
+  height: 5px;
+  opacity: 0.6;
+}
+
+.first-run-immersive-stage-heading p {
+  margin-top: 10px;
+  line-height: 1.7;
+}
+
+.first-run-immersive-shell .first-run-immersive-stage-icon {
+  border: 1px solid var(--fr-line);
+  box-shadow: none;
+  border-radius: 15px;
+}
+
+.first-run-immersive-shell .first-run-appearance-section,
+.first-run-immersive-shell .first-run-summary-launch-grid > section {
+  border: 1px solid var(--fr-line);
+  box-shadow: none;
+  border-radius: 18px;
+}
+
+.first-run-immersive-shell .first-run-appearance-section::before {
+  display: none;
+}
+
+.first-run-summary-launch-grid > section::before {
+  display: none;
+}
+
+.first-run-immersive-shell .first-run-options button.is-active,
+.first-run-immersive-shell .first-run-appearance-mode-grid button.is-active,
+.first-run-immersive-shell .first-run-appearance-preset-grid button.is-active {
+  box-shadow: none;
+}
+
+.first-run-immersive-stage .first-run-options button::after {
+  display: none;
+}
+
+.first-run-immersive-stage .first-run-path-preview {
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid var(--fr-line);
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.first-run-workspace-header,
+.first-run-immersive-actions {
+  border-color: var(--fr-line);
+  border-top-style: solid;
+  border-bottom-style: solid;
+}
+
+.first-run-workspace-header {
+  border-top: 0;
+}
+
+.first-run-immersive-actions {
+  border-bottom: 0;
+}
+
+.first-run-workspace-header strong {
+  border-width: 1px;
+  box-shadow: none;
+}
+
+.first-run-immersive-stage-heading h3:focus-visible {
+  outline: none;
+}
+
+.first-run-phase-nav button,
+.first-run-phase-nav button.is-active {
+  box-shadow: none;
+}
+
+.first-run-immersive-stage .first-run-language-options button {
+  border-width: 1px;
+  box-shadow: 0 2px 0 var(--fr-shadow-ink);
+}
+
+.first-run-immersive-stage .first-run-language-options button.is-active {
+  box-shadow: 0 2px 0 var(--fr-navy);
+}
+
+.first-run-immersive-actions .settings-action-button {
+  border-width: 1px;
+  border-radius: 12px;
+}
+
+.first-run-immersive-stage > * {
+  flex-shrink: 0;
+}
+
+.first-run-immersive-stage .first-run-options button {
+  min-height: 76px;
+  padding: 10px 14px;
+}
+
+.first-run-immersive-stage .first-run-language-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-content: flex-start;
+  align-content: flex-start;
+  gap: 8px;
+}
+
+.first-run-immersive-stage .first-run-language-options button,
+.first-run-immersive-stage .first-run-language-options button:nth-last-child(-n + 2) {
+  display: inline-flex;
+  flex: 0 0 auto;
+  grid-column: auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.first-run-immersive-stage .first-run-language-options button::after {
+  display: none;
+}
+
+.first-run-immersive-stage .first-run-step-notes {
+  display: none;
+}
+
+.first-run-preferences-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.first-run-library-grid {
+  gap: 14px;
+}
+
+.first-run-preferences-grid .first-run-ultralight-card {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--fr-line);
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.first-run-preferences-grid .first-run-ultralight-icon {
+  display: none;
+}
+
+.first-run-preferences-grid .first-run-ultralight-copy header {
+  flex-wrap: wrap;
+}
+
+.first-run-immersive-stage .first-run-basics-section {
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--fr-line);
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.first-run-immersive-stage .first-run-basics-section::before {
+  display: none;
+}
+
+.first-run-immersive-stage .first-run-path-preview {
+  max-height: 84px;
+}
+
+.first-run-folder-list {
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.first-run-language-note {
+  margin: -4px 0 0;
+  color: var(--fr-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.first-run-edition-notice {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--color-bg);
+  color: var(--theme-heading-text);
+}
+
+.first-run-edition-notice h4,
+.first-run-edition-notice p {
+  margin: 0;
+}
+
+.first-run-edition-notice p {
+  color: var(--fr-muted);
+  line-height: 1.55;
+}
+
+.first-run-appearance-panel {
+  gap: 12px;
+}
+
+.first-run-appearance-section {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.first-run-appearance-mode-grid button {
+  min-height: 48px;
+  padding: 6px 10px;
+}
+
+.first-run-preset-disclosure {
+  display: block;
+}
+
+.first-run-preset-disclosure > summary {
+  padding-block: 6px;
+  color: var(--fr-ink);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.first-run-preset-disclosure > summary > div {
+  display: inline-flex;
+  gap: 9px;
+  margin-inline-start: 6px;
+}
+
+.first-run-preset-disclosure > summary small {
+  margin-inline-start: 12px;
+  color: var(--fr-muted);
+}
+
+.first-run-preset-disclosure > summary:focus-visible {
+  outline: 2px solid var(--fr-pink-deep);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.first-run-preset-disclosure[open] > summary {
+  margin-bottom: 8px;
+}
+
+.first-run-wallpaper-body {
+  grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (min-width: 1600px) {
+  .first-run-immersive-stage .first-run-language-options {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .first-run-immersive-stage .first-run-language-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .first-run-backdrop--immersive {
+    overflow: hidden;
+  }
+
+  .first-run-immersive-shell {
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .first-run-immersive-journey {
+    grid-template-columns: minmax(0, 1fr) 150px;
+    grid-template-rows: auto auto;
+    min-height: 0;
+    gap: 12px;
+    padding: 18px 22px;
+  }
+
+  .first-run-journey-brand {
+    display: none;
+  }
+
+  .first-run-journey-copy {
+    max-width: none;
+  }
+
+  .first-run-journey-copy h2 {
+    font-size: 24px;
+  }
+
+  .first-run-journey-copy p,
+  .first-run-journey-copy .first-run-community-links {
+    display: none;
+  }
+
+  .first-run-phase-nav {
+    grid-column: 1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .first-run-phase-nav button {
+    display: flex;
+    justify-content: center;
+    min-height: 32px;
+  }
+
+  .first-run-phase-marker {
+    display: none;
+  }
+
+  .first-run-mascot {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    width: 100%;
+    height: 132px;
+    margin: 0;
+  }
+
+  .first-run-immersive-workspace {
+    min-height: 0;
+    overflow: hidden;
+    gap: 12px;
+    padding: 18px 22px;
+  }
+
+  .first-run-immersive-stage {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .first-run-immersive-actions {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .first-run-immersive-actions .first-run-action-cluster {
+    justify-content: flex-end;
+  }
+
+  .first-run-immersive-actions .settings-action-button {
+    width: auto;
+  }
+
+  .first-run-preferences-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .first-run-wallpaper-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .first-run-wallpaper-preview {
+    max-width: 240px;
+  }
+}

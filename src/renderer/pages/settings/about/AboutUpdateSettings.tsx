@@ -17,7 +17,9 @@ import {
   autoUpdateSourceOptions,
   baiduPanShareUrl,
   bilibiliSpaceUrl,
+  discordInviteUrl,
   officialWebsiteUrl,
+  qqGroupUrl,
   userDocumentationUrl,
 } from '../general/generalSettingsModel';
 
@@ -55,8 +57,8 @@ const updateLinks = [
   { icon: ExternalLink, labelKey: 'settings.about.links.baiduPan', url: baiduPanShareUrl },
   { icon: ExternalLink, labelKey: 'settings.about.links.bilibili', url: bilibiliSpaceUrl },
   { icon: History, labelKey: 'settings.about.updates.action.history', url: 'https://github.com/moekotori/echo/releases' },
-  { icon: ExternalLink, labelKey: 'settings.about.updates.action.qq', url: 'https://qm.qq.com/q/KrJE8PIqSQ' },
-  { icon: ExternalLink, labelKey: 'settings.about.updates.action.discord', url: 'https://discord.gg/g7v4WMRq3K' },
+  { icon: ExternalLink, labelKey: 'settings.about.updates.action.qq', url: qqGroupUrl },
+  { icon: ExternalLink, labelKey: 'settings.about.updates.action.discord', url: discordInviteUrl },
 ] satisfies Array<{
   icon: typeof ExternalLink;
   labelKey: TranslationKey;

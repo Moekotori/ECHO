@@ -167,6 +167,7 @@ const makeAppSettings = (
   lyricsColor: "#314054",
   lyricsSmartReadableColorsEnabled: false,
   lyricsImmersiveCoverStyleEnabled: false,
+  lyricsPageStyle: "default",
   lyricsImmersiveCoverGlassEnabled: false,
   lyricsImmersiveCoverGlassBlurPx: 16,
   lyricsHighResolutionNetworkCoverEnabled: false,
@@ -2142,9 +2143,9 @@ describe("LyricsPage", () => {
     expect(window.echo.library.resolveLyricsBackgroundCover).not.toHaveBeenCalled();
   });
 
-  it("keeps the immersive album cover lyrics style disabled by default", async () => {
+  it("uses Afterlight when lyrics page style is missing", async () => {
     const track = makeTrack({ coverId: "cover 1" });
-    mockEcho(track);
+    mockEcho(track, 0, { lyricsPageStyle: undefined });
 
     const { container } = render(
       <PlaybackQueueProvider>
@@ -2157,9 +2158,37 @@ describe("LyricsPage", () => {
     await screen.findAllByRole("heading", { name: "Test Song" });
     const page = container.querySelector(".lyrics-page") as HTMLElement;
 
+    expect(page.dataset.lyricsPageStyle).toBe("afterglowCover");
     expect(page.dataset.immersiveCoverStyle).toBeUndefined();
     expect(page.dataset.background).toBe("theme");
     expect(page.style.getPropertyValue("--lyrics-cover")).toBe("none");
+  });
+
+  it.each([
+    ["afterglowCover", "theme"],
+    ["folded", "cover"],
+  ] as const)("renders the %s layout with the shared lyrics timeline", async (style, background) => {
+    const track = makeTrack({ coverId: "cover 1" });
+    mockEcho(track, 0, { lyricsPageStyle: style, lyricsImmersiveCoverStyleEnabled: true });
+
+    const { container } = render(
+      <PlaybackQueueProvider>
+        <QueueSeed track={track}>
+          <LyricsPage initialLyrics={lyrics} usePlayerDrawerHeader />
+        </QueueSeed>
+      </PlaybackQueueProvider>,
+    );
+
+    const page = container.querySelector<HTMLElement>(".lyrics-page");
+    await waitFor(() => expect(page?.dataset.lyricsPageStyle).toBe(style));
+    expect(page?.dataset.background).toBe(background);
+    expect(page?.dataset.immersiveCoverStyle).toBeUndefined();
+    expect(page?.querySelector(".lyrics-track-header-floating")).toBeNull();
+    expect(page?.querySelectorAll(".lyrics-scroll .lyrics-line")).toHaveLength(lyrics.length);
+    if (style === "afterglowCover") {
+      expect(page?.querySelector(".lyrics-afterglow-cover__main")?.getAttribute("src")).toBe("echo-cover://large/cover%201");
+      expect(page?.style.getPropertyValue("--afterglow-cover-accent-rgb")).toBeTruthy();
+    }
   });
 
   it("uses the rose vinyl lyrics page style as a cover-backed layout option", async () => {

@@ -5,6 +5,7 @@ import { isDisplayableBpmAnalysis } from '../../../shared/constants/audioAnalysi
 import type { LibraryTrack } from '../../../shared/types/library';
 import { isDsdCodec, isHiResAudioSpec } from '../../../shared/utils/audioQuality';
 import { translateFallback, useOptionalI18n } from '../../i18n/I18nProvider';
+import { TrackPlaybackIndicator } from './TrackPlaybackIndicator';
 
 export type HifiTagKind = 'flac' | 'lossless' | 'depth' | 'rate' | 'bitrate' | 'bpm' | 'dsf' | 'hires' | 'mqa';
 
@@ -16,6 +17,7 @@ export type HifiTag = {
 type TrackRowProps = {
   track: LibraryTrack;
   isPlaying: boolean;
+  variant?: 'songs';
   isSelected?: boolean;
   duplicateHiddenCount?: number;
   onPlay?: (track: LibraryTrack) => void;
@@ -113,12 +115,13 @@ const tagClassNameByKind: Record<HifiTagKind, string> = {
 };
 
 export const TrackRow = memo(
-  ({ track, isPlaying, isSelected = false, duplicateHiddenCount = 0, onPlay, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, isLoading = false, isDownloading = false, downloadProgress = null, onShowVersions, onOpenMenu, isDraggable = false, isDragging = false, isDropTarget = false, priorityCover = false, onDragStart, onDragOver, onDrop, onDragEnd, audioInfoLayout = 'tags' }: TrackRowProps): JSX.Element => {
+  ({ track, isPlaying, variant, isSelected = false, duplicateHiddenCount = 0, onPlay, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, isLoading = false, isDownloading = false, downloadProgress = null, onShowVersions, onOpenMenu, isDraggable = false, isDragging = false, isDropTarget = false, priorityCover = false, onDragStart, onDragOver, onDrop, onDragEnd, audioInfoLayout = 'tags' }: TrackRowProps): JSX.Element => {
     const t = useOptionalI18n()?.t ?? translateFallback;
     const tags = tagsFromTrack(track);
     const audioInfoTags = tags.filter((tag) => tag.kind !== 'bpm');
     const bpmTag = tags.find((tag) => tag.kind === 'bpm');
     const isUnavailable = track.unavailable === true;
+    const genre = track.genre?.trim();
     const remoteSourceLabel = track.mediaType === 'remote' ? track.sourceDisplayName ?? track.provider ?? t('library.source.remote') : null;
     const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
     const shouldShowCover = Boolean(track.coverThumb && track.coverThumb !== failedCoverUrl);
@@ -298,7 +301,11 @@ export const TrackRow = memo(
 
         <div className="track-main">
           <div className="track-title-row">
-            {isLoading ? <Loader2 className="spinning-icon track-loading-icon" size={13} aria-hidden="true" /> : isPlaying ? <span className="playing-dot" aria-hidden="true" /> : null}
+            {isLoading ? (
+              <Loader2 className="spinning-icon track-loading-icon" size={13} aria-hidden="true" />
+            ) : isPlaying && (
+              variant === 'songs' ? <TrackPlaybackIndicator trackId={track.id} /> : <span className="playing-dot" aria-hidden="true" />
+            )}
             <strong className="track-title">{track.title}</strong>
             {remoteSourceLabel ? <span className="remote-track-source-badge">{remoteSourceLabel}</span> : null}
             {isLoading ? <span className="playing-pill loading-pill">加载中</span> : null}
@@ -340,7 +347,12 @@ export const TrackRow = memo(
           {audioInfoLayout === 'combined' ? (
             <>
               <span className="track-year-info">{track.year ?? '—'}</span>
-              <span className="track-genre-info" title={track.genre?.trim() || undefined}>{track.genre?.trim() || '—'}</span>
+              <span className="track-genre-info" title={genre || undefined}>{genre || '—'}</span>
+            </>
+          ) : variant === 'songs' ? (
+            <>
+              <span className="songs-track-genre" title={genre || undefined}>{genre || '—'}</span>
+              <span className="songs-track-year">{track.year ?? '—'}</span>
             </>
           ) : null}
         </div>
@@ -396,6 +408,7 @@ export const TrackRow = memo(
   (previous, next) =>
     previous.track === next.track &&
     previous.isPlaying === next.isPlaying &&
+    previous.variant === next.variant &&
     previous.isSelected === next.isSelected &&
     previous.duplicateHiddenCount === next.duplicateHiddenCount &&
     previous.onPlay === next.onPlay &&

@@ -1,0 +1,245 @@
+.songs-page {
+  --songs-cover-size: 60px;
+}
+
+.songs-page .songs-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+
+.songs-page .songs-title-group {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.songs-page .songs-title-group h1 {
+  font-size: clamp(28px, 2.6vw, 34px);
+  letter-spacing: -0.025em;
+}
+
+.songs-page .songs-title-group span {
+  padding: 3px 9px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 999px;
+  background: var(--theme-field-bg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.songs-page .songs-tools {
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 10px;
+  background: var(--theme-field-bg);
+}
+
+.songs-page .songs-tools .tool-button {
+  border-radius: 6px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.songs-page .songs-tools .tool-button:not(:disabled):is(:hover, :focus-visible) {
+  background: var(--theme-button-bg-hover);
+}
+
+.songs-page .songs-tools .tool-button.danger:not(:disabled):is(:hover, :focus-visible) {
+  color: var(--theme-danger-text);
+  background: var(--theme-danger-bg);
+}
+
+.songs-page .songs-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  padding-block-end: 12px;
+  border-block-end: 1px solid var(--theme-panel-border);
+}
+
+.songs-page .search-box {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 520px;
+}
+
+.songs-page .songs-control-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.songs-page .sort-button {
+  min-height: 36px;
+  padding-inline: 9px;
+}
+
+.songs-page > .track-list-shell {
+  container: songs-list / inline-size;
+}
+
+.songs-page .track-row {
+  margin-block: 0;
+  padding-block: 5px;
+}
+
+.songs-page .track-cover {
+  position: relative;
+}
+
+.songs-page .track-cover::before,
+.songs-page .track-cover::after {
+  transition: opacity 150ms ease;
+}
+
+.songs-page .track-row[data-clickable="true"] .track-cover::before,
+.songs-page .track-row[data-clickable="true"] .track-cover::after {
+  position: absolute;
+  z-index: 1;
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+}
+
+.songs-page .track-row[data-clickable="true"] .track-cover::before {
+  inset: 0;
+  background: var(--theme-overlay-bg);
+}
+
+.songs-page .track-row[data-clickable="true"] .track-cover::after {
+  inset: 50% auto auto 50%;
+  width: 13px;
+  height: 16px;
+  background: var(--theme-on-accent);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translate(-40%, -50%);
+}
+
+.songs-page .track-row[data-clickable="true"]:is(:hover, :focus-visible) .track-cover::before,
+.songs-page .track-row[data-clickable="true"]:is(:hover, :focus-visible) .track-cover::after {
+  opacity: 1;
+}
+
+html .songs-page .track-list .track-row[data-playing="true"]:not([data-selected="true"], [data-drop-target="true"]) {
+  background: linear-gradient(90deg, var(--theme-list-row-bg-active), transparent 70%);
+  box-shadow: inset 2px 0 var(--theme-accent-solid-bg);
+}
+
+.songs-page .track-row[data-playing="true"] .track-title {
+  color: var(--theme-accent-text-strong);
+}
+
+.songs-page .track-duration,
+.songs-page .songs-track-year {
+  font-variant-numeric: tabular-nums;
+}
+
+.songs-page .track-actions {
+  opacity: 0.68;
+  transform: none;
+}
+
+.songs-page .track-empty-state {
+  justify-content: center;
+}
+
+.songs-track-genre,
+.songs-track-year {
+  display: none;
+}
+
+@container songs-list (min-width: 900px) {
+  .songs-page .track-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.35fr) minmax(56px, 0.16fr);
+    align-items: center;
+    column-gap: 24px;
+  }
+
+  .songs-page .track-main > :is(.track-title-row, .track-subtitle, .track-tags) {
+    grid-column: 1;
+  }
+
+  .songs-track-genre,
+  .songs-track-year {
+    display: block;
+    grid-row: 1 / 4;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--theme-muted-text);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .songs-track-genre { grid-column: 2; }
+  .songs-track-year { grid-column: 3; }
+}
+
+.songs-page .track-playback-indicator {
+  flex: 0 0 16px;
+  color: var(--theme-accent-text-strong);
+}
+
+.track-playback-indicator rect {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  transform: scaleY(0.42);
+  --meter-duration: 850ms;
+  --meter-delay: 0ms;
+}
+
+.track-playback-indicator rect:nth-child(2) {
+  transform: scaleY(0.8);
+  --meter-duration: 670ms;
+  --meter-delay: -330ms;
+}
+
+.track-playback-indicator rect:nth-child(3) {
+  transform: scaleY(0.54);
+  --meter-duration: 930ms;
+  --meter-delay: -580ms;
+}
+
+.track-playback-indicator rect:nth-child(4) {
+  transform: scaleY(0.67);
+  --meter-duration: 730ms;
+  --meter-delay: -180ms;
+}
+
+.track-playback-indicator[data-animating="true"] rect {
+  animation: songs-playing-bars var(--meter-duration) ease-in-out var(--meter-delay) infinite alternate;
+}
+
+@keyframes songs-playing-bars {
+  0% { transform: scaleY(0.25); }
+  50% { transform: scaleY(0.95); }
+  100% { transform: scaleY(0.4); }
+}
+
+@media (max-width: 820px), (orientation: portrait) and (min-width: 821px) and (max-width: 1400px) {
+  .songs-page {
+    --songs-cover-size: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .songs-page .track-cover::before,
+  .songs-page .track-cover::after {
+    transition: none;
+  }
+
+  .track-playback-indicator[data-animating="true"] rect {
+    animation: none;
+  }
+}
+
+html[data-accessibility-reduce-motion='true'] .track-playback-indicator rect,
+.app-shell[data-low-spec-mode='true'] .track-playback-indicator rect {
+  animation: none;
+}

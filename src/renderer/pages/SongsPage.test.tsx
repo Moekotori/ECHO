@@ -35,6 +35,7 @@ vi.mock('../components/library/TrackList', () => ({
     selectedTrackIds,
     currentTrackId,
     currentTrackIndex,
+    locateRequest,
     canLoadMore,
     canLoadPrevious,
     duplicateHiddenCounts,
@@ -58,6 +59,7 @@ vi.mock('../components/library/TrackList', () => ({
     selectedTrackIds?: Record<string, boolean>;
     currentTrackId: string | null;
     currentTrackIndex?: number | null;
+    locateRequest?: { trackId: string } | null;
     canLoadMore?: boolean;
     canLoadPrevious?: boolean;
     duplicateHiddenCounts?: Record<string, number>;
@@ -85,6 +87,7 @@ vi.mock('../components/library/TrackList', () => ({
       data-loaded-count={loadedCount ?? tracks.length}
       data-loaded-start-index={loadedStartIndex ?? 0}
       data-current-track-index={currentTrackIndex ?? -1}
+      data-locate-track-id={locateRequest?.trackId}
       data-loading-more={String(isLoadingMore)}
       data-visible-ids={tracks.slice(0, 2).map((track) => track.id).join(',')}
     >
@@ -890,6 +893,8 @@ describe('SongsPage', () => {
 
     await screen.findByText('Song One');
     expect(screen.getByTestId('current-track-id').textContent).toBe('none');
+    const locateButton = screen.getByRole('button', { name: /定位到当前播放歌曲|Locate Playing Track/ }) as HTMLButtonElement;
+    expect(locateButton.disabled).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Song One' }));
 
@@ -908,6 +913,8 @@ describe('SongsPage', () => {
       })),
     );
     await waitFor(() => expect(screen.getByTestId('current-track-id').textContent).toBe('track-1'));
+    fireEvent.click(locateButton);
+    expect(screen.getByTestId('track-list').getAttribute('data-locate-track-id')).toBe('track-1');
   });
 
   it('adds a song to a local playlist from the row list-plus action', async () => {
@@ -1509,6 +1516,39 @@ describe('SongsPage', () => {
     expect(list.getAttribute('data-selected-count')).toBe('1');
     fireEvent.click(screen.getByRole('button', { name: 'Select Far 0' }));
     expect(list.getAttribute('data-selected-count')).toBe('2');
+  });
+
+  it('locates the playing track after its page has been unloaded', async () => {
+    window.localStorage.setItem('echo-next.locale', 'zh-CN');
+    const playing = makeTrack();
+    const far = makeTrack({ id: 'far', title: 'Far Song' });
+    installEcho([playing]);
+    vi.mocked(window.echo.app.getSettings).mockResolvedValue({ locale: 'zh-CN', duplicateTracksEnabled: false, duplicateTracksMode: 'strict' } as AppSettings);
+    const getTracks = vi.mocked(window.echo.library.getTracks);
+    let targetVisible = false;
+    getTracks.mockImplementation(async (query) => {
+      if (query?.locateTrackId && !targetVisible) return makePagedResult([], { total: 18709 });
+      const page = query?.page ?? 1;
+      return makePagedResult(page === 101 ? [far] : [playing], { page, total: 18709, hasMore: true });
+    });
+
+    await renderSongsPage();
+    await screen.findByText('Song One');
+    fireEvent.click(screen.getByRole('button', { name: 'Song One' }));
+    await waitFor(() => expect(screen.getByTestId('current-track-id').textContent).toBe(playing.id));
+    fireEvent.click(screen.getByRole('button', { name: 'mock-jump-far' }));
+    await screen.findByText('Far Song');
+
+    const locateButton = screen.getByRole('button', { name: '定位到当前播放歌曲' });
+    fireEvent.click(locateButton);
+    expect(await screen.findByText('当前播放的歌曲不在此列表中。')).toBeTruthy();
+    expect(screen.getByText('Far Song')).toBeTruthy();
+
+    targetVisible = true;
+    fireEvent.click(locateButton);
+    await screen.findByText('Song One');
+    expect(getTracks).toHaveBeenCalledWith(expect.objectContaining({ locateTrackId: playing.id, sourceProvider: 'local' }));
+    expect(screen.getByTestId('track-list').getAttribute('data-locate-track-id')).toBe(playing.id);
   });
 
   it('viewport requests during a pending page read load only the latest destination next', async () => {

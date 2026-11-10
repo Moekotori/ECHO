@@ -6,6 +6,8 @@ export const officialWebsiteUrl = 'https://echonext.moe';
 export const userDocumentationUrl = 'https://echonext.moe/zh/docs/';
 export const baiduPanShareUrl = 'https://pan.baidu.com/s/1ta0McyhY9knaD6FT5xW3Og?pwd=echo';
 export const bilibiliSpaceUrl = 'https://space.bilibili.com/25265128';
+export const qqGroupUrl = 'https://qm.qq.com/q/KrJE8PIqSQ';
+export const discordInviteUrl = 'https://discord.gg/g7v4WMRq3K';
 export const bugFeedbackUrl = 'https://github.com/Moekotori/ECHO/issues';
 export const authorEmailUrl = 'mailto:nyafairy233@gmail.com';
 

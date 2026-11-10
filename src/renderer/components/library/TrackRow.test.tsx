@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { TrackRow } from './TrackRow';
 import type { LibraryTrack } from '../../../shared/types/library';
+import { setPlaybackStatusSnapshot } from '../../stores/playbackStatusStore';
 
 const track = (overrides: Partial<LibraryTrack> = {}): LibraryTrack => ({
   id: 'track-1',
@@ -98,6 +99,29 @@ describe('TrackRow', () => {
     expect(container.querySelector('.playing-dot')).toBeTruthy();
     expect(screen.queryByText('Playing')).toBeNull();
     expect(screen.queryByText('播放中')).toBeNull();
+  });
+
+  it('animates the songs indicator only during playback of the matching track', () => {
+    const song = track({ genre: 'Electronic' });
+    const playbackStatus = { currentTrackId: song.id, state: 'playing', positionMs: 0, durationMs: 178000, filePath: song.path } as const;
+    const { container, rerender } = render(<TrackRow isPlaying variant="songs" track={song} />);
+    const indicator = () => container.querySelector('.track-playback-indicator');
+
+    act(() => { setPlaybackStatusSnapshot({ playbackStatus }); });
+    expect(indicator()?.getAttribute('data-animating')).toBe('true');
+    expect(indicator()?.querySelectorAll('rect')).toHaveLength(4);
+    expect(screen.getByText('Electronic')).toBeTruthy();
+    expect(screen.getByText('2025')).toBeTruthy();
+
+    act(() => { setPlaybackStatusSnapshot({ playbackStatus: { ...playbackStatus, state: 'paused' } }); });
+    expect(indicator()?.getAttribute('data-animating')).toBe('false');
+    expect(screen.getByRole('listitem').getAttribute('aria-current')).toBe('true');
+
+    act(() => { setPlaybackStatusSnapshot({ playbackStatus: { ...playbackStatus, currentTrackId: 'other-track' } }); });
+    expect(indicator()?.getAttribute('data-animating')).toBe('false');
+
+    rerender(<TrackRow isPlaying={false} variant="songs" track={song} />);
+    expect(indicator()).toBeNull();
   });
 
   it('shows loading instead of playing while a remote row is preparing playback', () => {

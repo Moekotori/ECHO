@@ -124,7 +124,10 @@ describe('LyricsView', () => {
     ], 1250, 0)).toBe(1);
   });
 
-  it('aligns word highlight immediately after seeking', async () => {
+  it.each([
+    ['continuous', '0.5000'],
+    ['discrete', '1'],
+  ] as const)('aligns %s word highlight immediately after seeking', async (mode, progress) => {
     const { container } = render(
       <LyricsView
         durationMs={3000}
@@ -133,6 +136,7 @@ describe('LyricsView', () => {
         playbackState="paused"
         positionMs={1250}
         positionUpdatedAtMs={0}
+        wordHighlightProgressMode={mode}
         onSeek={vi.fn()}
       />,
     );
@@ -140,7 +144,7 @@ describe('LyricsView', () => {
     await waitFor(() => {
       const currentWord = container.querySelector<HTMLElement>('.lyrics-word[data-word-state="current"]');
       expect(currentWord?.textContent).toBe('Hello ');
-      expect(currentWord?.style.getPropertyValue('--lyrics-word-progress')).toBe('0.5000');
+      expect(currentWord?.style.getPropertyValue('--lyrics-word-progress')).toBe(progress);
     });
   });
 

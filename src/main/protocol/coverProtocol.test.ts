@@ -156,6 +156,24 @@ describe('echo-wallpaper protocol', () => {
     expect(await response.text()).toBe('');
   });
 
+  it('previews only the latest chosen app wallpaper before saving it', async () => {
+    const wallpaperPath = join(wallpaperDirectory, 'chosen.png');
+    const otherPath = join(wallpaperDirectory, 'other.png');
+    writeFileSync(wallpaperPath, 'chosen wallpaper');
+    writeFileSync(otherPath, 'other wallpaper');
+    getAppSettingsMock.mockReturnValue({});
+    const { setAppWallpaperPreviewPath } = await import('./appWallpaperPreview');
+    setAppWallpaperPreviewPath(wallpaperPath);
+
+    const requestPreview = (path: string): Promise<Response> =>
+      getWallpaperHandler()(new Request(`echo-wallpaper://app/preview?path=${encodeURIComponent(path)}`));
+    expect(await (await requestPreview(wallpaperPath)).text()).toBe('chosen wallpaper');
+    expect((await requestPreview(otherPath)).status).toBe(404);
+
+    setAppWallpaperPreviewPath(otherPath);
+    expect((await requestPreview(wallpaperPath)).status).toBe(404);
+  });
+
   it('streams a local cover while preserving its MIME type and immutable cache policy', async () => {
     mkdirSync(coverCacheDirectory, { recursive: true });
     const coverPath = join(coverCacheDirectory, 'cover.webp');

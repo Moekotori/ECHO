@@ -1,0 +1,79 @@
+.first-run-lyrics-style__layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.first-run-lyrics-style__choices {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.first-run-lyrics-style__choices button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--theme-control-bg);
+  color: var(--theme-muted-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.first-run-lyrics-style__choices button:hover:not(:disabled) {
+  background: var(--theme-control-bg-hover);
+  color: var(--theme-heading-text);
+}
+
+.first-run-lyrics-style__choices button[aria-pressed="true"] {
+  color: var(--theme-heading-text);
+}
+
+.first-run-lyrics-style__choices button:focus-visible {
+  outline: 2px solid var(--theme-accent-solid-bg);
+  outline-offset: 2px;
+}
+
+.first-run-lyrics-style__choices button:disabled { opacity: .5; cursor: default; }
+.first-run-lyrics-style__choices button > span { flex: 1; }
+.first-run-lyrics-style__choices button > svg { flex-shrink: 0; }
+.first-run-lyrics-style__choices button > .lyrics-style-thumbnail {
+  flex: 0 0 72px;
+  width: 72px;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.first-run-lyrics-style__preview { min-width: 0; }
+.first-run-lyrics-style__preview > .lyrics-style-thumbnail {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.first-run-lyrics-style__layout[data-has-preview="false"] { grid-template-columns: minmax(0, 1fr); }
+.first-run-lyrics-style__layout[data-has-preview="false"] .first-run-lyrics-style__choices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  .first-run-lyrics-style__layout { grid-template-columns: minmax(0, 1fr); }
+  .first-run-lyrics-style__choices,
+  .first-run-lyrics-style__layout[data-has-preview="false"] .first-run-lyrics-style__choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .first-run-lyrics-style__choices button { flex-direction: column; gap: 6px; }
+  .first-run-lyrics-style__choices button > .lyrics-style-thumbnail { flex-basis: auto; width: 100%; }
+}

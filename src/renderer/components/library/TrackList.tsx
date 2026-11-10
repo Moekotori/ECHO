@@ -9,7 +9,9 @@ import type { TrackViewportRange } from '../../hooks/useTrackViewportPaging';
 type TrackListProps = {
   tracks: LibraryTrack[];
   currentTrackId: string | null;
+  variant?: 'songs';
   currentTrackIndex?: number | null;
+  locateRequest?: { trackId: string } | null;
   loadingTrackId?: string | null;
   canLoadMore?: boolean;
   canLoadPrevious?: boolean;
@@ -53,7 +55,7 @@ const loadAheadRows = 12;
 const priorityTrackCoverCount = 24;
 const locateCurrentTrackEvent = 'app:locate-current-track';
 
-export const TrackList = memo(({ tracks, currentTrackId, currentTrackIndex = null, loadingTrackId = null, canLoadMore = false, canLoadPrevious = false, totalCount, loadedCount = tracks.length, loadedStartIndex = 0, isLoadingMore = false, onEndReached, onStartReached, onViewportNeeded, onPlay, selectedTrackIds = {}, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, downloadingTrackIds = {}, downloadProgressByTrackId = {}, duplicateHiddenCounts = {}, onShowVersions, onOpenTrackMenu, onVisibleTrackIdsChange, isTrackDraggable, draggedTrackId = null, dropTargetTrackId = null, onTrackDragStart, onTrackDragOver, onTrackDrop, onTrackDragEnd, audioInfoLayout = 'tags', density = 'comfortable' }: TrackListProps): JSX.Element => {
+export const TrackList = memo(({ tracks, currentTrackId, variant, currentTrackIndex = null, locateRequest, loadingTrackId = null, canLoadMore = false, canLoadPrevious = false, totalCount, loadedCount = tracks.length, loadedStartIndex = 0, isLoadingMore = false, onEndReached, onStartReached, onViewportNeeded, onPlay, selectedTrackIds = {}, onToggleSelected, onAddToQueue, onAddToPlaylist, onDownload, onOpenArtist, onOpenAlbum, downloadingTrackIds = {}, downloadProgressByTrackId = {}, duplicateHiddenCounts = {}, onShowVersions, onOpenTrackMenu, onVisibleTrackIdsChange, isTrackDraggable, draggedTrackId = null, dropTargetTrackId = null, onTrackDragStart, onTrackDragOver, onTrackDrop, onTrackDragEnd, audioInfoLayout = 'tags', density = 'comfortable' }: TrackListProps): JSX.Element => {
   const { t } = useI18n();
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
   const loadRequestedRef = useRef(false);
@@ -61,6 +63,7 @@ export const TrackList = memo(({ tracks, currentTrackId, currentTrackIndex = nul
   const visibleTrackIdsKeyRef = useRef('');
   const visibleTrackIdsTimerRef = useRef<number | null>(null);
   const pendingVisibleTrackIdsRef = useRef<{ key: string; trackIds: string[] } | null>(null);
+  const handledLocateRequestRef = useRef(locateRequest);
   const rowHeight = density === 'compact' ? compactRowHeight : comfortableRowHeight;
   const virtualCount = Math.max(totalCount ?? tracks.length, tracks.length);
   const safeLoadedStartIndex = Math.max(0, Math.min(loadedStartIndex, Math.max(0, virtualCount - tracks.length)));
@@ -137,6 +140,21 @@ export const TrackList = memo(({ tracks, currentTrackId, currentTrackIndex = nul
     onViewportNeeded({ firstIndex, lastIndex });
   }, [onViewportNeeded, rowHeight, rowVirtualizer, virtualCount]);
 
+  const handleLocateCurrentTrack = useCallback((): void => {
+    if (!currentTrackId) return;
+    const loadedIndex = tracks.findIndex((track) => track.id === currentTrackId);
+    const absoluteIndex = loadedIndex >= 0 ? safeLoadedStartIndex + loadedIndex : currentTrackIndex;
+    if (absoluteIndex === null || absoluteIndex < 0 || absoluteIndex >= virtualCount) return;
+    if (loadedIndex < 0) onViewportNeeded?.({ firstIndex: absoluteIndex, lastIndex: absoluteIndex });
+    rowVirtualizer.scrollToIndex(absoluteIndex, { align: 'center' });
+  }, [currentTrackId, currentTrackIndex, onViewportNeeded, rowVirtualizer, safeLoadedStartIndex, tracks, virtualCount]);
+
+  useEffect(() => {
+    if (!locateRequest || handledLocateRequestRef.current === locateRequest) return;
+    handledLocateRequestRef.current = locateRequest;
+    if (locateRequest.trackId === currentTrackId) handleLocateCurrentTrack();
+  }, [currentTrackId, handleLocateCurrentTrack, locateRequest]);
+
   useEffect(() => {
     if (onViewportNeeded) {
       requestViewport();
@@ -153,21 +171,9 @@ export const TrackList = memo(({ tracks, currentTrackId, currentTrackIndex = nul
   }, [firstVirtualIndex, lastVirtualIndex, loadedBoundary, onViewportNeeded, renderedVirtualItems, requestLoadMore, requestLoadPrevious, requestViewport, safeLoadedStartIndex]);
 
   useEffect(() => {
-    const handleLocateCurrentTrack = (): void => {
-      if (!currentTrackId) {
-        return;
-      }
-
-      const loadedIndex = tracks.findIndex((track) => track.id === currentTrackId);
-      const absoluteIndex = loadedIndex >= 0 ? safeLoadedStartIndex + loadedIndex : currentTrackIndex;
-      if (absoluteIndex === null || absoluteIndex < 0 || absoluteIndex >= virtualCount) return;
-      if (loadedIndex < 0) onViewportNeeded?.({ firstIndex: absoluteIndex, lastIndex: absoluteIndex });
-      rowVirtualizer.scrollToIndex(absoluteIndex, { align: 'center' });
-    };
-
     window.addEventListener(locateCurrentTrackEvent, handleLocateCurrentTrack);
     return () => window.removeEventListener(locateCurrentTrackEvent, handleLocateCurrentTrack);
-  }, [currentTrackId, currentTrackIndex, onViewportNeeded, rowVirtualizer, safeLoadedStartIndex, tracks, virtualCount]);
+  }, [handleLocateCurrentTrack]);
 
   useEffect(() => {
     if (!onVisibleTrackIdsChange) {
@@ -275,6 +281,7 @@ export const TrackList = memo(({ tracks, currentTrackId, currentTrackIndex = nul
                 >
                   {track ? (
                     <TrackRow
+                      variant={variant}
                       audioInfoLayout={audioInfoLayout}
                       isPlaying={track.id === currentTrackId}
                       isLoading={track.id === loadingTrackId}
