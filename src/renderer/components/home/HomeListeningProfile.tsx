@@ -2,7 +2,6 @@ import type { CSSProperties } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { PlaybackStatsBreakdownItem, PlaybackStatsDashboard } from '../../../shared/types/library';
 import { useI18n } from '../../i18n/I18nProvider';
-import { formatDuration } from './homeFormatters';
 
 const qualitySegmentLimit = 5;
 

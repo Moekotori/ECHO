@@ -1992,7 +1992,7 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
               setPlayError(t('albumDetail.tracks.error.noCoverSaved'));
             }
             return;
-          case 'delete-song':
+          case 'delete-song': {
             if (!window.confirm(t('albumDetail.tracks.confirm.delete', { title: track.title }))) {
               return;
             }
@@ -2007,6 +2007,7 @@ export const AlbumDetailView = ({ album, onBack, onEscapeBack }: AlbumDetailView
             }
             window.dispatchEvent(new Event('library:changed'));
             return;
+          }
           case 'add-to-playlist':
             {
               if (track.mediaType === 'streaming') {

@@ -8,7 +8,7 @@ import '../styles/songs-filter.css';
 import '../styles/songs-page-polish.css';
 import { useTrackViewportPaging, type TrackViewportLoadMode, type TrackViewportRange } from '../hooks/useTrackViewportPaging';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpDown, Check, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, LocateFixed, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Download, FilePlus2, FolderPlus, ListFilter, Loader2, LocateFixed, Play, Radio, RotateCw, Search, Trash2, X } from 'lucide-react';
 import type { DuplicateTrackIndexSummary, DuplicateTrackMember, EditableTrackTags, LibraryAudioFormatFilter, LibraryFileFormatFilter, LibraryFolder, LibraryPlaylist, LibraryScanStatus, LibrarySort, LibraryTrack } from '../../shared/types/library';
 import type { RemoteSource } from '../../shared/types/remoteSources';
 import type { StreamingProviderDescriptor, StreamingProviderName, StreamingSearchResult, StreamingTrack } from '../../shared/types/streaming';
@@ -1948,7 +1948,7 @@ export const SongsPage = (): JSX.Element => {
               setError(t('songs.error.noCoverSaved'));
             }
             return;
-          case 'delete-song':
+          case 'delete-song': {
             if (!window.confirm(t('songs.confirm.deleteSong', { title: track.title }))) {
               return;
             }
@@ -1962,6 +1962,7 @@ export const SongsPage = (): JSX.Element => {
             ignoreNextLibraryChangedRef.current = true;
             window.dispatchEvent(new Event('library:changed'));
             return;
+          }
           case 'add-to-playlist':
             if (playlistTarget) {
               await handleAddTracksToPlaylist(actionTracks, playlistTarget);
