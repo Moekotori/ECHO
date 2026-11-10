@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import type { EditableTrackTags, LibraryPlaylist, LibraryTrack } from '../../../shared/types/library';
@@ -8,9 +8,10 @@ import { resolvePlaylistForTrackAdd } from '../../utils/appPrompt';
 import { dispatchAudioErrorNotice } from '../../utils/audioErrorNotice';
 import { TrackContextMenu } from '../library/TrackContextMenu';
 import type { TrackMenuAction } from '../library/TrackContextMenu';
-import { TrackTagEditorDrawer } from '../library/TrackTagEditorDrawer';
-const playerNowPlayingMenuActions = ['add-to-playlist', 'go-to-album', 'preview-cover', 'edit-tags', 'show-in-folder', 'copy-name-artist'] as const satisfies readonly TrackMenuAction[];
 import { PlayerControlIcon } from './PlayerControlIcon';
+
+const TrackTagEditorDrawer = lazy(() => import('../library/TrackTagEditorDrawer').then((module) => ({ default: module.TrackTagEditorDrawer })));
+const playerNowPlayingMenuActions = ['add-to-playlist', 'go-to-album', 'preview-cover', 'edit-tags', 'show-in-folder', 'copy-name-artist'] as const satisfies readonly TrackMenuAction[];
 
 type PlayerNowPlayingMoreMenuProps = {
   liked?: boolean;
@@ -222,15 +223,19 @@ export const PlayerNowPlayingMoreMenu = ({
           onClose={closeMenu}
         />
       ) : null}
-      <TrackTagEditorDrawer
-        track={editingTrack}
-        isOpen={isTagEditorOpen}
-        isSaving={isSavingTags}
-        error={tagEditorError}
-        onClose={closeTagEditor}
-        onSave={handleSaveTags}
-        onTrackUpdated={onTrackUpdated}
-      />
+      {editingTrack ? (
+        <Suspense fallback={null}>
+          <TrackTagEditorDrawer
+            track={editingTrack}
+            isOpen={isTagEditorOpen}
+            isSaving={isSavingTags}
+            error={tagEditorError}
+            onClose={closeTagEditor}
+            onSave={handleSaveTags}
+            onTrackUpdated={onTrackUpdated}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 };

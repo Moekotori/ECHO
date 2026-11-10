@@ -1,3 +1,4 @@
+import '../styles/settings-cache-and-update.css';
 import { StreamingAccountsPanel } from './settings/accounts/StreamingAccountsPanel';
 import { TidalAuthSettings } from './settings/accounts/TidalAuthSettings';
 import { UltraLightSettingsRows } from './settings/components/UltraLightSettingsRows';

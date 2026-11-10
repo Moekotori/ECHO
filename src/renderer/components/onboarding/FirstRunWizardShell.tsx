@@ -11,6 +11,7 @@ import { useDialogFocus } from '../../hooks/useDialogFocus';
 import { FirstRunCommunityLinks } from './FirstRunCommunityLinks';
 import { firstRunPhases, firstRunSteps } from './firstRunSteps';
 import type { FirstRunStep, FirstRunStepId } from './firstRunSteps';
+import '../../styles/first-run-base.css';
 import '../../styles/first-run-immersive.css';
 import '../../styles/first-run-layout.css';
 import '../../styles/first-run-calm.css';

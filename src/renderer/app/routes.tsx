@@ -1,6 +1,5 @@
 import { lazy } from 'react';
 import { Disc3, Inbox, PanelTop, type LucideIcon } from 'lucide-react';
-import { HomePage } from '../pages/HomePage';
 import {
   EchoAlbumsIcon,
   EchoArtistsIcon,
@@ -30,6 +29,7 @@ export type AppRouteId = SidebarRouteId | 'lyrics' | `plugin:${string}`;
 export const pendingAppRouteStorageKey = 'echo-next.pending-route';
 
 const pageLoaders = {
+  home: () => import('../pages/HomePage'),
   albums: () => import('../pages/AlbumsPage'),
   artists: () => import('../pages/ArtistsPage'),
   'audio-cd': () => import('../pages/AudioCdPage'),
@@ -65,6 +65,7 @@ export const preloadPendingAppRoute = async (): Promise<void> => {
   }
 };
 
+const HomePage = lazy(() => pageLoaders.home().then((module) => ({ default: module.HomePage })));
 const AlbumsPage = lazy(() => pageLoaders.albums().then((module) => ({ default: module.AlbumsPage })));
 const ArtistsPage = lazy(() => pageLoaders.artists().then((module) => ({ default: module.ArtistsPage })));
 const AudioCdPage = lazy(() => pageLoaders['audio-cd']().then((module) => ({ default: module.AudioCdPage })));

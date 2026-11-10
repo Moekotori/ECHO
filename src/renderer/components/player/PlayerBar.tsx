@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { button as MotionButton, footer as MotionFooter } from 'motion/react-m';
 import { createPortal } from 'react-dom';
 import { Cable, Captions, CircleAlert, Download, FileDown, Loader2, Monitor, X } from 'lucide-react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -3041,7 +3041,7 @@ export const PlayerBar = ({
       <div className="echo-screen-reader-only" role="status" aria-live="polite" aria-atomic="true">
         {playbackAnnouncement}
       </div>
-      <motion.footer
+      <MotionFooter
         className="player-bar"
         {...playerTrackSwipe.handlers}
         data-popover-open={openPopover ? 'true' : undefined}
@@ -3087,7 +3087,7 @@ export const PlayerBar = ({
         </div>
       ) : null}
       <div className="player-now">
-        <motion.button
+        <MotionButton
           ref={coverButtonRef}
           className="player-cover"
           data-empty={!artworkUrl}
@@ -3122,7 +3122,7 @@ export const PlayerBar = ({
             </div>
           )}
           <div className="cover-sheen" />
-        </motion.button>
+        </MotionButton>
         {coverEntryMenuPosition ? (
           <PlayerCoverEntryMenu position={coverEntryMenuPosition} opensMv={playerBarCoverOpensMv} onClose={closeCoverEntryMenu} />
         ) : null}
@@ -3286,7 +3286,7 @@ export const PlayerBar = ({
         ) : null}
         </PlayerUtilitiesPopover>
       </div>
-      </motion.footer>
+      </MotionFooter>
     </>
   );
 };
