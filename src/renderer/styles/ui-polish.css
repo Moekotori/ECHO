@@ -3309,8 +3309,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 }
 
 /* Every settings page follows the same board hierarchy as General. */
-.settings-page .settings-section--panel > .settings-subsection-title,
-.settings-page .settings-expanded-panel--playback > .settings-subsection-title {
+.settings-page .settings-section--panel > .settings-subsection-title {
   min-height: 48px;
   grid-column: 1 / -1;
   margin: 14px 0 0;
@@ -3322,30 +3321,25 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-panel-bg-strong) 72%, transparent);
 }
 
-.settings-page .settings-section--panel > .section-title + .settings-subsection-title,
-.settings-page .settings-expanded-panel--playback > .settings-subsection-title:first-child {
+.settings-page .settings-section--panel > .section-title + .settings-subsection-title {
   margin-top: 0;
 }
 
-.settings-page .settings-section--panel > .settings-subsection-title span,
-.settings-page .settings-expanded-panel--playback > .settings-subsection-title span {
+.settings-page .settings-section--panel > .settings-subsection-title span {
   color: var(--theme-heading-text);
   font-size: 14px;
   font-weight: var(--echo-weight-heading);
   letter-spacing: 0;
 }
 
-.settings-page .settings-section--panel > .settings-subsection-title small,
-.settings-page .settings-expanded-panel--playback > .settings-subsection-title small {
+.settings-page .settings-section--panel > .settings-subsection-title small {
   color: var(--theme-muted-text);
   font-size: 12px;
   opacity: 1;
 }
 
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
-  > :not(.section-title):not(.settings-subsection-title),
-.settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
-  > :not(.settings-subsection-title) {
+  > :not(.section-title):not(.settings-subsection-title) {
   margin: 0;
   border-right: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
   border-left: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
@@ -3355,15 +3349,11 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 }
 
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
-  > .setting-row,
-.settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
   > .setting-row {
   padding-inline: 20px;
 }
 
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
-  > .setting-row:hover,
-.settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
   > .setting-row:hover {
   background: color-mix(in srgb, var(--theme-list-row-bg-hover) 84%, transparent);
 }
@@ -3371,11 +3361,7 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
   > :not(.section-title):not(.settings-subsection-title):has(+ .settings-subsection-title),
 .settings-page .settings-section--panel:has(> .settings-subsection-title)
-  > :not(.section-title):not(.settings-subsection-title):last-child,
-.settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
-  > :not(.settings-subsection-title):has(+ .settings-subsection-title),
-.settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
-  > :not(.settings-subsection-title):last-child {
+  > :not(.section-title):not(.settings-subsection-title):last-child {
   border-bottom: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
   border-radius: 0 0 8px 8px;
 }
@@ -3482,24 +3468,42 @@ html[data-theme="dark"] .app-shell.app-shell--lyrics:has(.lyrics-page) .player-t
 }
 
 .settings-page .settings-expanded-panel--playback {
-  padding: 12px;
+  padding: 0 20px 8px;
+}
+
+.settings-page .settings-expanded-panel--playback > .settings-subsection-title {
+  margin: 0;
+  padding: 18px 0 6px;
+  border-bottom: 0;
+}
+
+.settings-page .settings-expanded-panel--playback > .settings-subsection-title::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--theme-list-row-border);
+}
+
+.settings-page .settings-expanded-panel--playback > .setting-row {
+  min-height: 58px;
+  padding-block: 10px;
+}
+
+.settings-page .settings-expanded-panel--playback > .setting-row:has(+ .settings-subsection-title) {
+  border-bottom-width: 0;
 }
 
 @media (max-width: 760px) {
-  .settings-page .settings-section--panel > .settings-subsection-title,
-  .settings-page .settings-expanded-panel--playback > .settings-subsection-title {
+  .settings-page .settings-section--panel > .settings-subsection-title {
     padding: 12px 14px 10px;
   }
 
   .settings-page .settings-section--panel:has(> .settings-subsection-title)
-    > .setting-row,
-  .settings-page .settings-expanded-panel--playback:has(> .settings-subsection-title)
     > .setting-row {
     padding-inline: 14px;
   }
 
   .settings-page .settings-expanded-panel--playback {
-    padding: 8px;
+    padding-inline: 14px;
   }
 }
 

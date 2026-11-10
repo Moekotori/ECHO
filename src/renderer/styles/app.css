@@ -15656,28 +15656,20 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 }
 
 .settings-page .settings-playback-advanced-toggle {
-  justify-content: space-between;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   min-height: 42px;
-  padding: 7px 8px 7px 12px;
-  border: 0;
+  margin-inline-start: auto;
+  padding: 6px 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--theme-panel-bg-muted) 62%, transparent);
-  box-shadow: none;
 }
 
 .settings-page .settings-playback-advanced-toggle:hover {
-  background: color-mix(in srgb, var(--theme-panel-bg-muted) 84%, transparent);
+  background: var(--theme-list-row-bg-hover);
 }
 
 .settings-page .settings-playback-advanced-toggle > svg {
   order: 2;
-  width: 24px;
-  height: 24px;
-  padding: 5px;
-  color: var(--theme-muted-text);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--theme-panel-bg) 78%, transparent);
 }
 
 .settings-page .settings-playback-advanced-toggle > span {
@@ -15687,6 +15679,7 @@ html[data-theme="dark"] .control-popover-slider::-moz-range-thumb {
 .settings-page .settings-playback-advanced-toggle strong {
   color: var(--theme-heading-text);
   font-size: 14px;
+  white-space: normal;
 }
 
 .settings-page .settings-playback-advanced-toggle small {
