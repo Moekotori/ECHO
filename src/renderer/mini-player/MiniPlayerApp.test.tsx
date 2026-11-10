@@ -575,6 +575,38 @@ describe('MiniPlayerApp', () => {
     expect(document.querySelector('.mini-player-cover img')?.getAttribute('src')).toBe('echo-cover://thumb/status-cover');
   });
 
+  it('follows consecutive host track changes without a fresh playback snapshot', async () => {
+    const first = makeTrack();
+    const second = makeTrack({ id: 'track-2', path: 'D:\\Music\\Second.flac', title: 'Second Song' });
+    const third = makeTrack({
+      id: 'track-3',
+      path: 'D:\\Music\\Third.flac',
+      title: 'Third Song',
+      artist: 'Third Artist',
+      coverThumb: 'echo-cover://thumb/third-cover',
+    });
+    installEchoMock(first, {
+      queueSession: makeQueueSession(first, [first, second, third]),
+      desktopLyricsPlaybackStatus: makePlaybackStatus(first),
+    });
+    let publishAudioStatus!: (status: AudioStatus) => void;
+    vi.mocked(window.echo!.audio.onStatus).mockImplementation((handler) => {
+      publishAudioStatus = handler;
+      return vi.fn();
+    });
+
+    render(<MiniPlayerApp />);
+    await screen.findByText(first.title);
+    act(() => publishAudioStatus({ ...makeAudioStatus(second), positionSeconds: 1 }));
+    expect(screen.getByText(second.title)).toBeTruthy();
+    act(() => publishAudioStatus({ ...makeAudioStatus(third), positionSeconds: 2 }));
+    expect(screen.getByText(third.title)).toBeTruthy();
+    expect(screen.getByText(third.artist)).toBeTruthy();
+    expect(document.querySelector('.mini-player-cover img')?.getAttribute('src')).toBe(third.coverThumb);
+    expect((document.querySelector('.mini-player-progress-row input') as HTMLInputElement).value).toBe('2');
+    expect(window.echo!.playback.getStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores stale forwarded system audio status for a different track', async () => {
     const staleTrack = makeTrack({
       id: 'stale-track',

@@ -315,17 +315,25 @@ export const MiniPlayerApp = (): JSX.Element => {
     (forwardedPlaybackStatus.expiresAtMs === null || forwardedStatusClockMs <= forwardedPlaybackStatus.expiresAtMs)
       ? forwardedPlaybackStatus.status
       : null;
-  const identifiedActiveSharedAudio =
+  const identifiedSharedAudio =
     sharedPlaybackStatus.audioStatus &&
-    (activeStates.has(sharedPlaybackStatus.audioStatus.state) || sharedPlaybackStatus.audioStatus.state === 'paused') &&
     (sharedPlaybackStatus.audioStatus.currentTrackId || sharedPlaybackStatus.audioStatus.currentFilePath)
       ? sharedPlaybackStatus.audioStatus
       : null;
+  const identifiedActiveSharedAudio = identifiedSharedAudio &&
+    (activeStates.has(identifiedSharedAudio.state) || identifiedSharedAudio.state === 'paused')
+      ? identifiedSharedAudio
+      : null;
+  // The native status stream can change tracks without refreshing playback.getStatus().
+  const sharedPlaybackCandidate = identifiedSharedAudio &&
+    !audioStatusMatchesPlaybackStatus(identifiedSharedAudio, sharedPlaybackStatus.playbackStatus)
+      ? null
+      : sharedPlaybackStatus.playbackStatus;
   const playbackStatus =
     forwardedPlaybackCandidate &&
     (!identifiedActiveSharedAudio || audioStatusMatchesPlaybackStatus(identifiedActiveSharedAudio, forwardedPlaybackCandidate))
       ? forwardedPlaybackCandidate
-      : sharedPlaybackStatus.playbackStatus;
+      : sharedPlaybackCandidate;
   const queueItems = queueSession?.items ?? [];
   const queueTracks = queueItems.map((item) => item.track);
   const activeAudioStatus = useMemo(() => {
