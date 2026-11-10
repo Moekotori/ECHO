@@ -46,9 +46,13 @@ const taglibWasmModuleUrl = pathToFileURL(require.resolve('taglib-wasm')).href;
 const workerSource = String.raw`
 const { parentPort, workerData } = module['require']('node:worker_threads');
 
+const id3v1Size = 128;
+const hasId3v1Tag = (audio) => audio.length >= id3v1Size &&
+  Buffer.from(audio.subarray(-id3v1Size, -id3v1Size + 3)).toString('latin1') === 'TAG';
+
 (async () => {
   const { filePath, taglibWasmModuleUrl } = workerData;
-  const [{ applyCoverArt, applyTagsToFile }, fs] = await Promise.all([
+  const [{ applyCoverArt, applyTagsToFile, TagLib }, fs] = await Promise.all([
     import(taglibWasmModuleUrl),
     import('node:fs/promises'),
   ]);
@@ -62,9 +66,56 @@ const { parentPort, workerData } = module['require']('node:worker_threads');
   }
 
   if (workerData.kind === 'lyrics') {
-    await applyTagsToFile(filePath, {
-      lyrics: workerData.lyricsText,
-    });
+    const { constants } = await import('node:fs');
+    const { dirname, join } = await import('node:path');
+    const sourcePath = await fs.realpath(filePath);
+    await fs.access(sourcePath, constants.W_OK);
+    const original = await fs.stat(sourcePath, { bigint: true });
+    const lyricsText = workerData.lyricsText;
+
+    // The WASI writer does not persist the lyrics property. Edit and verify the
+    // serialized tag in memory before replacing the source file.
+    const taglib = await TagLib.initialize({ forceWasmType: 'emscripten' });
+    const originalAudio = await fs.readFile(sourcePath);
+    const file = await taglib.open(originalAudio);
+    let updatedAudio;
+    try {
+      file.setProperty('LYRICS', lyricsText);
+      if (!file.save()) {
+        throw new Error('Could not save embedded lyrics');
+      }
+      updatedAudio = file.getFileBuffer();
+      // TagLib may append an ID3v1 footer while saving MP3 lyrics to ID3v2.
+      // Keep the original MPEG tail so gapless padding is interpreted as before.
+      if (file.getFormat() === 'MP3' && !hasId3v1Tag(originalAudio) && hasId3v1Tag(updatedAudio) &&
+          originalAudio.subarray(-id3v1Size).equals(updatedAudio.subarray(-2 * id3v1Size, -id3v1Size))) {
+        updatedAudio = updatedAudio.subarray(0, -id3v1Size);
+      }
+    } finally {
+      file.dispose();
+    }
+    const verifiedFile = await taglib.open(updatedAudio);
+    try {
+      if (verifiedFile.getProperty('LYRICS') !== lyricsText) {
+        throw new Error('Could not verify embedded lyrics in the updated audio file');
+      }
+    } finally {
+      verifiedFile.dispose();
+    }
+
+    const tempDirectory = await fs.mkdtemp(join(dirname(sourcePath), '.echo-lyrics-'));
+    const tempPath = join(tempDirectory, 'audio.tmp');
+    try {
+      await fs.writeFile(tempPath, updatedAudio, { mode: Number(original.mode & 0o777n), flush: true });
+      const current = await fs.stat(sourcePath, { bigint: true });
+      if (current.ino !== original.ino || current.size !== original.size || current.ctimeNs !== original.ctimeNs) {
+        throw new Error('Audio file changed while embedding lyrics');
+      }
+      await fs.rename(tempPath, sourcePath);
+    } finally {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+      await fs.rmdir(tempDirectory).catch(() => undefined);
+    }
     parentPort.postMessage({ ok: true });
     return;
   }

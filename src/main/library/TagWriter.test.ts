@@ -103,7 +103,6 @@ describe('writeEmbeddedTrackTags', () => {
       taglibWasmModuleUrl: expect.stringMatching(/^file:\/\//),
     });
     expect(workerMockState.workers[0].source).toContain("workerData.kind === 'lyrics'");
-    expect(workerMockState.workers[0].source).toContain('lyrics: workerData.lyricsText');
   });
 
   it('writes cover-only updates without rewriting other tags', async () => {
