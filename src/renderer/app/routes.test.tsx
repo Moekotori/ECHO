@@ -126,8 +126,8 @@ describe('app route loading boundaries', () => {
     }
   });
 
-  it('keeps only the startup home route eager', () => {
-    expect(isLazyRoute('home')).toBe(false);
+  it('keeps the homepage outside the startup shell bundle', () => {
+    expect(isLazyRoute('home')).toBe(true);
   });
 
   it('resolves a first-stage page through the existing Suspense boundary', async () => {
